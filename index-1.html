@@ -1,0 +1,3887 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Modo Concierto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --stage: #0d0d0f;
+    --panel: #18181b;
+    --panel-edge: #27272a;
+    --lyric: #f2ede0;
+    --chord: #c98a3e;
+    --chord-dim: #6b5330;
+    --accent: #f0a825;
+    --muted: #7a7d82;
+    --danger: #e0483a;
+    --tape: #d9cdb0;
+    --tape-ink: #2b2418;
+    --lyric-size: 26px;
+    --line-gap: 30px;
+    --radius: 14px;
+    --font-display: 'Bebas Neue', Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+    --font-lyric: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-chord: 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  /* respuesta visual inmediata al tocar: todo botón (y los "chips"/filas
+     clicables que no son <button>) se achica un poco apenas se presiona,
+     para confirmar el toque al instante sin depender de esperar el efecto final */
+  button, .chip, .drawer-item{ transition: transform 0.08s ease; }
+  button:active, .chip:active, .drawer-item:active{ transform: scale(0.93); }
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background: radial-gradient(ellipse 120% 70% at 50% -10%, #1b2029 0%, var(--stage) 55%);
+    color: var(--lyric);
+    font-family: var(--font-lyric);
+    overflow-y: auto;
+    height:100vh;
+    height:100dvh;
+    min-height:100vh;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- top bar ---------- */
+  header{
+    flex-shrink:0;
+    padding: 14px 16px 10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    border-bottom:1px solid var(--panel-edge);
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  }
+  .title-block{ min-width:0; flex:1; }
+  .song-title{
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 400;
+    color: var(--lyric);
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    letter-spacing: 0.6px;
+  }
+  .song-meta{
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    margin-top: 2px;
+  }
+  .key-pill{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 999px;
+    padding: 6px 6px 6px 12px;
+    flex-shrink:0;
+  }
+  .key-pill span{
+    font-family: var(--font-chord);
+    font-weight:700;
+    color: var(--chord);
+    font-size:15px;
+    min-width: 30px;
+    text-align:center;
+  }
+  .key-pill button{
+    width:28px; height:28px;
+    border-radius:50%;
+    border:none;
+    background: var(--panel-edge);
+    color: var(--lyric);
+    font-size:16px;
+    line-height:1;
+    cursor:pointer;
+  }
+  .key-pill button:active{ background: var(--accent); color:#08110f; }
+
+  .song-picker{
+    flex-shrink:0;
+    display:flex;
+    gap:8px;
+    padding: 10px 16px;
+    overflow-x:auto;
+    border-bottom:1px solid var(--panel-edge);
+  }
+  .song-picker::-webkit-scrollbar{ display:none; }
+  .chip{
+    flex-shrink:0;
+    padding:7px 14px;
+    border-radius:999px;
+    border:1px solid var(--panel-edge);
+    background: var(--panel);
+    color: var(--muted);
+    font-size:13px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .chip.active{
+    border-color: var(--accent);
+    color: var(--stage);
+    background: var(--accent);
+    font-weight:600;
+  }
+
+  /* ---------- lyrics stage ---------- */
+  .stage-wrap{
+    flex:1;
+    min-height:0;
+    position:relative;
+  }
+  .spotlight{
+    pointer-events:none;
+    position:absolute;
+    inset:0;
+    background: radial-gradient(circle at 50% 38%, rgba(226,165,61,0.07), transparent 55%);
+    z-index:1;
+  }
+  /* línea de referencia fija: marca en qué parte de la letra "está" el
+     músico en este instante mientras el texto se mueve debajo. */
+  .reading-line{
+    pointer-events:none;
+    position:absolute;
+    left:0; right:0;
+    top:38%;
+    height:0;
+    border-top:2px solid rgba(226,165,61,0.55);
+    z-index:2;
+  }
+  .reading-line-arrow{
+    position:absolute;
+    left:6px;
+    top:-9px;
+    color: var(--accent);
+    font-size:13px;
+    text-shadow: 0 0 6px rgba(0,0,0,0.7);
+  }
+  #lyrics{
+    height:100%;
+    overflow-y:auto;
+    padding: 28px 20px 45vh;
+    scroll-behavior: smooth;
+    /* oscurece las líneas lejos de la línea de referencia (arriba/abajo) y
+       deja nítida una banda alrededor de ella, para que resalte la línea
+       "actual" sin tener que ubicarla mirando toda la pantalla */
+    -webkit-mask-image: linear-gradient(to bottom,
+      rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 18%,
+      rgba(0,0,0,1) 34%, rgba(0,0,0,1) 46%,
+      rgba(0,0,0,0.55) 62%, rgba(0,0,0,0.15) 82%, rgba(0,0,0,0.05) 100%);
+    mask-image: linear-gradient(to bottom,
+      rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.55) 18%,
+      rgba(0,0,0,1) 34%, rgba(0,0,0,1) 46%,
+      rgba(0,0,0,0.55) 62%, rgba(0,0,0,0.15) 82%, rgba(0,0,0,0.05) 100%);
+  }
+  #lyrics::-webkit-scrollbar{ width:0; }
+  .section-label{
+    font-family: var(--font-display);
+    font-size: 16px;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: var(--tape-ink);
+    margin: 26px 0 12px;
+    display: inline-block;
+    background: var(--tape);
+    background-image: repeating-linear-gradient(115deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 2px, transparent 2px, transparent 9px);
+    padding: 4px 14px 6px;
+    border-radius: 2px 4px 3px 5px;
+    box-shadow: 0 3px 6px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.2) inset;
+    transform: rotate(-1.3deg);
+  }
+  .line{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:flex-end;
+    margin-bottom: var(--line-gap);
+    line-height:1.25;
+  }
+  /* línea actualmente pasando por la línea de referencia fija: se resalta
+     la letra y el acorde para saber de un vistazo "dónde vamos" */
+  .line.line-active .lyric-tag{
+    color:#fff;
+    text-shadow: 0 0 14px rgba(244,241,232,0.4);
+  }
+  .line.line-active .chord-tag{
+    color: var(--chord);
+    text-shadow: 0 0 12px rgba(226,165,61,0.7);
+    transform: scale(1.08);
+    transform-origin: left bottom;
+  }
+  .grp{
+    display:inline-flex;
+    flex-direction:column;
+    align-items:flex-start;
+    margin-right: 0.32em;
+  }
+  .chord-tag{
+    font-family: var(--font-chord);
+    font-size: calc(var(--lyric-size) * 0.55);
+    font-weight:700;
+    color: var(--chord);
+    min-height: calc(var(--lyric-size) * 0.62);
+    line-height:1;
+    white-space:nowrap;
+  }
+  .lyric-tag{
+    font-size: var(--lyric-size);
+    color: var(--lyric);
+    white-space:pre;
+    font-weight:500;
+  }
+  .empty-line{ height: calc(var(--line-gap) * 0.6); }
+  /* placeholder para secciones sin letra/acorde (intro instrumental, puente,
+     etc.): sin esto, el resaltado de "línea actual" no tenía nada de esa
+     sección para marcar y saltaba directo a la primera línea de la
+     siguiente, dando la falsa impresión de haber avanzado ya. */
+  /* placeholder para secciones sin letra/acorde (intro instrumental, puente,
+     etc.): sin esto, el resaltado de "línea actual" no tenía nada de esa
+     sección para marcar y saltaba directo a la primera línea de la
+     siguiente, dando la falsa impresión de haber avanzado ya. Además se le
+     da bastante alto mínimo: una sección sin letra (ej. una intro de 25s
+     tocada solo con instrumentos) antes ocupaba apenas dos líneas de texto
+     en la pantalla, mucho menos que la altura hasta donde está la línea de
+     lectura fija (38% de la pantalla) — eso hacía que la línea pareciera
+     ya "pisando" el borde de la sección siguiente incluso antes de arrancar
+     el scroll. Con este alto mínimo, la sección ocupa un tramo real de
+     pantalla acorde a su lugar en la canción.
+  */
+  .line.line-placeholder{
+    min-height: 46vh;
+    display:flex;
+    align-items:center;
+  }
+  .line.line-placeholder .lyric-tag{
+    font-style: italic;
+    opacity: 0.55;
+    letter-spacing: 0.4px;
+  }
+  .cue-block{
+    display:inline-block;
+    margin: 2px 0 24px;
+    padding: 7px 14px;
+    background: rgba(226,165,61,0.12);
+    border-left: 3px solid var(--chord);
+    border-radius: 0 8px 8px 0;
+    font-family: var(--font-chord);
+    font-size: calc(var(--lyric-size) * 0.48);
+    color: var(--chord);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    transition: background-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  }
+  .cue-block.cue-active{
+    background: var(--chord);
+    color: #08110f;
+    box-shadow: 0 0 18px rgba(226,165,61,0.55);
+    transform: scale(1.04);
+  }
+
+  /* ---------- pulso visual del tempo ---------- */
+  .beat-flash{
+    height: 4px;
+    flex-shrink: 0;
+    background: transparent;
+    transition: background-color 0.08s ease, box-shadow 0.08s ease;
+  }
+  .beat-flash.on{
+    background: var(--chord);
+    box-shadow: 0 0 14px var(--chord);
+  }
+
+  /* ---------- insignia de músicos conectados (solo Director) ---------- */
+  .follower-badge{
+    position:absolute;
+    top:10px; right:12px;
+    background: rgba(63,184,171,0.14);
+    border:1px solid var(--accent);
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-family: var(--font-chord);
+    font-size: 12px;
+    font-weight:700;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    z-index: 3;
+    pointer-events: none;
+    white-space: nowrap;
+    display:none;
+  }
+  .follower-badge.show{ display:block; }
+  .follower-badge.zero{ color: var(--muted); border-color: var(--panel-edge); background: rgba(255,255,255,0.02); }
+
+  /* ---------- insignia de posición actual ---------- */
+  .position-badge{
+    position:absolute;
+    top:10px; left:50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    border:none;
+    padding: 7px 22px;
+    border-radius: 999px;
+    font-family: var(--font-chord);
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #14161f;
+    z-index: 2;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.4);
+  }
+
+  /* ---------- conteo visual grande ---------- */
+  .count-overlay{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family: var(--font-chord);
+    font-size: 34vw;
+    font-weight:700;
+    color: var(--chord);
+    text-shadow: 0 0 40px rgba(226,165,61,0.55);
+    z-index:5;
+    pointer-events:none;
+    opacity:0;
+    transform: scale(0.85);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+    background: rgba(10,12,16,0.35);
+  }
+  .count-overlay.show{ opacity:1; transform: scale(1); }
+
+  /* ---------- insignia de modo local (sin conexión) ---------- */
+  .conn-fallback-badge{
+    position:absolute;
+    bottom:14px; left:50%;
+    transform: translateX(-50%);
+    background: rgba(217,105,90,0.92);
+    color:#fff;
+    padding:6px 14px;
+    border-radius:999px;
+    font-size:11.5px;
+    font-weight:600;
+    letter-spacing:0.3px;
+    z-index:4;
+    display:none;
+    white-space:nowrap;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .conn-fallback-badge.show{ display:block; }
+
+  /* ---------- recordatorio de respaldo del repertorio ---------- */
+  .backup-reminder{
+    position:absolute;
+    top:10px; left:10px; right:10px;
+    background: rgba(20,24,31,0.94);
+    border:1px solid var(--panel-edge);
+    color: var(--lyric);
+    padding:9px 10px;
+    border-radius:12px;
+    font-size:11.5px;
+    line-height:1.4;
+    z-index:6;
+    display:none;
+    align-items:center;
+    gap:8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .backup-reminder.show{ display:flex; }
+  .backup-reminder button{
+    border:none; border-radius:8px; padding:6px 10px;
+    font-size:11px; font-weight:600; flex-shrink:0;
+  }
+  #backupReminderBtn{ background: var(--accent); color:#08110f; }
+  #backupReminderDismiss{ background: var(--panel-edge); color: var(--lyric); width:28px; padding:6px 0; }
+
+  /* ---------- bottom control dock ---------- */
+  footer{
+    flex-shrink:0;
+    background: #1b2028;
+    border-top: 1px solid #333a47;
+    box-shadow: 0 -8px 20px rgba(0,0,0,0.35);
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  }
+  .row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .row + .row{ margin-top:10px; }
+  .cue-row{
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    display:none;
+  }
+  .cue-row.show{ display:flex; }
+  .cue-btn{
+    flex:0 0 auto;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:2px;
+    background: #2a3140;
+    border:1px solid var(--panel-edge);
+    color: var(--lyric);
+    border-radius:10px;
+    padding:7px 11px;
+    font-size:10px;
+    font-weight:700;
+    letter-spacing:0.3px;
+    min-width:56px;
+  }
+  .cue-btn .cue-icon{ font-size:17px; line-height:1; }
+  .cue-btn:active{ background: var(--accent); color:#08110f; }
+  button{ touch-action: manipulation; }
+  .talk-row{ display:none; }
+  .talk-row.show{ display:flex; }
+  .talk-btn-wide{
+    flex:1 1 auto;
+    touch-action: none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    background: #2a3140;
+    border:1px solid var(--panel-edge);
+    color: var(--lyric);
+    border-radius:10px;
+    padding:12px;
+    font-size:14px;
+    font-weight:700;
+  }
+  .talk-btn-wide.talking{ background: var(--danger); color:#fff; }
+
+  .talking-badge{
+    position:absolute;
+    top:10px; right:10px;
+    background: rgba(20,24,31,0.94);
+    border:1px solid var(--danger);
+    color:#fff;
+    padding:6px 12px;
+    border-radius:20px;
+    font-size:12px;
+    font-weight:600;
+    z-index:6;
+    display:none;
+  }
+  .talking-badge.show{ display:block; }
+
+  .calib-banner{
+    position:absolute;
+    top:44px; left:8px; right:8px;
+    background: rgba(20,24,31,0.97);
+    border:1px solid var(--accent);
+    border-radius:12px;
+    padding:8px 10px;
+    display:none;
+    align-items:center;
+    gap:8px;
+    z-index:7;
+    flex-wrap:wrap;
+  }
+  .calib-banner.show{ display:flex; }
+  .calib-text{ font-size:12px; color: var(--lyric); flex:1 1 auto; }
+  .calib-text span{ color: var(--accent); font-weight:700; }
+
+  .detect-panel{
+    position:absolute;
+    top:44px; left:8px; right:8px;
+    max-height:70vh;
+    overflow-y:auto;
+    background: rgba(15,18,23,0.98);
+    border:1px solid var(--accent);
+    border-radius:12px;
+    padding:12px;
+    display:none;
+    z-index:8;
+  }
+  .detect-panel.show{ display:block; }
+  .detect-header{ font-size:13px; font-weight:700; margin-bottom:8px; color: var(--lyric); }
+  .detect-row{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:6px 0;
+    border-bottom:1px solid rgba(255,255,255,0.06);
+  }
+  .detect-label{ flex:1 1 auto; font-size:13px; color: var(--lyric); }
+  .detect-secs{ min-width:52px; text-align:center; font-size:13px; color: var(--accent); font-weight:700; }
+  .detect-row .btn.small{ padding:4px 8px; font-size:12px; min-width:auto; }
+  .detect-actions{ display:flex; gap:8px; margin-top:10px; }
+  .detect-actions .btn{ flex:1; }
+  .ref-audio-empty{ font-size:13px; color: var(--lyric); opacity:0.6; text-align:center; padding:12px 4px; }
+  .ref-audio-empty .btn{ display:block; margin:10px auto 0; }
+  #refAudioEl{ margin-bottom:8px; }
+  .ref-audio-loaded, .ref-audio-empty{ display:none; }
+  .ref-audio-loaded.show, .ref-audio-empty.show{ display:block; }
+
+  /* ---------- señal en vivo entre músicos (solo, corte, final...) ---------- */
+  .cue-overlay{
+    position:absolute;
+    inset:0;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    background: rgba(10,12,16,0.55);
+    z-index:7;
+    pointer-events:none;
+    opacity:0;
+    transition: opacity 0.15s ease;
+  }
+  .cue-overlay.show{ opacity:1; }
+  .cue-overlay .cue-overlay-icon{ font-size:22vw; line-height:1; text-shadow: 0 0 40px rgba(0,0,0,0.6); }
+  .cue-overlay .cue-overlay-label{
+    font-family: var(--font-chord);
+    font-size:24px;
+    font-weight:700;
+    letter-spacing:3px;
+    color:#fff;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+  }
+  .btn{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius: 12px;
+    background: #2a3140;
+    color: var(--lyric);
+    cursor:pointer;
+    user-select:none;
+  }
+  .btn{ transition: transform 0.08s ease, filter 0.08s ease; }
+  .btn:active{ filter:brightness(1.3); transform: scale(0.92); }
+  .play-btn{
+    width:52px; height:52px;
+    border-radius:50%;
+    background: var(--accent);
+    color:#08110f;
+    font-size:20px;
+    flex-shrink:0;
+    transition: transform 0.08s ease, filter 0.08s ease, background 0.15s ease;
+  }
+  .play-btn:active{ filter:brightness(1.3); transform: scale(0.9); }
+  .play-btn.playing{ background: var(--danger); }
+  .play-btn:disabled{ opacity:0.6; }
+  .ghost{
+    width:40px; height:40px;
+    font-size:15px;
+    flex-shrink:0;
+  }
+  .slider-block{ flex:1; min-width:0; }
+  .slider-label{
+    display:flex;
+    justify-content:space-between;
+    font-size:10px;
+    color:var(--muted);
+    text-transform:uppercase;
+    letter-spacing:1px;
+    margin-bottom:4px;
+  }
+  .speed-readout{
+    font-size:10px;
+    color: var(--accent);
+    margin-top:3px;
+    min-height:12px;
+    text-align:right;
+  }
+  input[type=range]{
+    width:100%;
+    -webkit-appearance:none;
+    height:4px;
+    border-radius:2px;
+    background: var(--panel-edge);
+    outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:16px; height:16px;
+    border-radius:50%;
+    background: var(--accent);
+    cursor:pointer;
+    margin-top:-6px;
+  }
+  .bpm-block{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-shrink:0;
+  }
+  .bpm-tap{
+    width:52px; height:40px;
+    border-radius:12px;
+    background: var(--panel-edge);
+    color: var(--lyric);
+    font-family: var(--font-chord);
+    font-size:12px;
+    font-weight:700;
+    border:none;
+    position:relative;
+  }
+  .bpm-tap .dot{
+    position:absolute;
+    top:5px; right:6px;
+    width:6px; height:6px;
+    border-radius:50%;
+    background: var(--muted);
+  }
+  .bpm-tap.beat .dot{ background: var(--accent); }
+  .bpm-num{
+    font-family: var(--font-chord);
+    font-size:15px;
+    font-weight:700;
+    min-width: 42px;
+    text-align:center;
+  }
+  .toggle{
+    width:40px; height:40px;
+    border-radius:12px;
+    font-size:16px;
+  }
+  .toggle.on{ background: var(--accent); color:#08110f; }
+
+  /* ---------- director mode ---------- */
+  .role-bar{
+    flex-shrink:0;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .role-row1{ display:flex; gap:8px; }
+  .role-row1 .chip{ flex:1; text-align:center; }
+  .role-row2{ display:flex; gap:8px; }
+  #roomCode{
+    flex:1;
+    min-width:0;
+    background: var(--panel);
+    border:1px solid var(--panel-edge);
+    color: var(--lyric);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 16px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  #roomCode::placeholder{ color: var(--muted); text-transform:none; letter-spacing:normal; font-size:14px; }
+  #connectBtn{
+    width:auto;
+    padding: 0 18px;
+    height:44px;
+    font-size:14px;
+    font-weight:700;
+    flex-shrink:0;
+    background: var(--accent);
+    color:#08110f;
+  }
+  #connectBtn:disabled{ background: var(--panel-edge); color: var(--muted); }
+  #connStatus{
+    font-size:12px;
+    color: var(--muted);
+    line-height:1.4;
+  }
+  .ping-badge{
+    font-size:11px;
+    color: var(--muted);
+    margin-left:8px;
+    font-family: var(--font-chord);
+    display:none;
+  }
+  .ping-badge.show{ display:inline; }
+  .ping-badge.warn{ color: var(--chord); }
+  .ping-badge.bad{ color: var(--danger); }
+
+  /* ---------- píldora de estado compacta (reemplaza la barra de rol permanente) ---------- */
+  .conn-pill{
+    flex-shrink:0;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding: 6px 16px;
+    border-bottom:1px solid var(--panel-edge);
+    background: rgba(255,255,255,0.015);
+  }
+  .conn-pill #connStatus{ margin:0; }
+
+  /* ---------- panel de ajustes: todo lo que se configura una vez, no en vivo ---------- */
+  .settings-overlay{
+    position:fixed;
+    inset:0;
+    background: rgba(0,0,0,0.55);
+    z-index:50;
+    display:none;
+  }
+  .settings-overlay.show{ display:block; }
+  .settings-panel{
+    position:absolute;
+    top:0; right:0; bottom:0;
+    width:min(360px, 88vw);
+    background: var(--stage);
+    border-left:1px solid var(--panel-edge);
+    overflow-y:auto;
+    padding:16px;
+  }
+  .settings-panel-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size:16px;
+    font-weight:700;
+    color: var(--lyric);
+    margin-bottom:14px;
+  }
+  .settings-section{ margin-bottom:22px; }
+  .settings-section-title{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    color: var(--muted);
+    margin-bottom:8px;
+    font-weight:700;
+  }
+  .settings-panel .row{ flex-wrap:wrap; }
+  .settings-panel .ghost.btn,
+  .settings-panel .toggle.btn{
+    width:auto;
+    height:44px;
+    padding:0 14px;
+    font-size:13px;
+    white-space:nowrap;
+    flex:1 1 auto;
+  }
+  body.follower-locked .key-pill button,
+  body.follower-locked #songPicker .chip,
+  body.follower-locked .play-btn,
+  body.follower-locked #restartBtn,
+  body.follower-locked #speedSlider,
+  body.follower-locked #tapTempo,
+  body.follower-locked #metroToggle,
+  body.follower-locked #syncToggle{
+    pointer-events:none;
+    opacity:0.4;
+  }
+  body.follower-locked .play-btn{ background: var(--panel-edge); color: var(--muted); }
+  body.follower-locked #songPicker{ display:none; }
+  body.follower-locked #setlistToggle{ display:none; }
+
+  /* ---------- stage nav (prev/next) ---------- */
+  .stage-nav{
+    position:absolute;
+    bottom:14px;
+    width:46px; height:46px;
+    border-radius:50%;
+    background: rgba(20,24,31,0.55);
+    border:1px solid var(--panel-edge);
+    color: var(--lyric);
+    font-size:17px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:2;
+    opacity:0.55;
+  }
+  .stage-nav:active{ opacity:1; background: var(--accent); color:#08110f; }
+  .stage-nav:disabled{ opacity:0.12; }
+  #prevSong{ left:12px; }
+  #nextSong{ right:12px; }
+  body.follower-locked .stage-nav{ pointer-events:none; opacity:0.15; }
+
+  /* ---------- setlist drawer ---------- */
+  .drawer-overlay{
+    position:fixed; inset:0;
+    background: rgba(0,0,0,0.5);
+    z-index:20;
+    opacity:0; pointer-events:none;
+    transition: opacity 0.2s;
+  }
+  .drawer-overlay.open{ opacity:1; pointer-events:auto; }
+  .drawer{
+    position:fixed; top:0; right:0; height:100%;
+    width:82%; max-width:340px;
+    background: var(--panel);
+    border-left:1px solid var(--panel-edge);
+    z-index:21;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+    display:flex; flex-direction:column;
+  }
+  .drawer.open{ transform: translateX(0); }
+  .drawer-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px; border-bottom:1px solid var(--panel-edge);
+  }
+  .drawer-head h3{ margin:0; font-family: var(--font-display); font-size:16px; color: var(--lyric); }
+  .drawer-close{
+    width:32px; height:32px; border-radius:50%;
+    background: var(--panel-edge); border:none; color: var(--lyric); font-size:16px;
+  }
+  .drawer-list{ flex:1; overflow-y:auto; padding:6px 0; }
+  .drawer-item{
+    display:flex; align-items:center; gap:10px;
+    padding:12px 16px;
+    border-bottom:1px solid var(--panel-edge);
+  }
+  .drawer-item.current{ background: rgba(63,184,171,0.08); border-left:3px solid var(--accent); }
+  .drawer-badge{
+    width:26px; height:26px; border-radius:50%;
+    background: var(--panel-edge);
+    display:flex; align-items:center; justify-content:center;
+    font-family: var(--font-chord); font-size:12px; color: var(--muted);
+    flex-shrink:0;
+  }
+  .drawer-item.current .drawer-badge{ background: var(--accent); color:#08110f; }
+  .drawer-info{ flex:1; min-width:0; }
+  .drawer-info .t{ font-size:14px; color: var(--lyric); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .drawer-info .k{ font-size:11px; color: var(--muted); font-family: var(--font-chord); margin-top:2px; }
+  .drawer-reorder{ display:flex; flex-direction:column; gap:3px; flex-shrink:0; }
+  .drawer-reorder button{
+    width:24px; height:20px; border:none; border-radius:5px;
+    background: var(--panel-edge); color: var(--muted); font-size:9px;
+  }
+  .drawer-edit{
+    width:28px; height:28px; border-radius:8px;
+    border:none; background: var(--panel-edge); color: var(--lyric);
+    font-size:13px; flex-shrink:0;
+  }
+  .drawer-add{
+    margin:10px 16px 4px; padding:11px;
+    border-radius:12px; border:1px dashed var(--panel-edge);
+    background:transparent; color: var(--accent);
+    font-size:13px; font-weight:600;
+  }
+  .drawer-reset{
+    margin:0 16px 14px; padding:8px;
+    border:none; background:transparent;
+    color: var(--muted); font-size:11px;
+    text-decoration: underline;
+  }
+  .drawer-share-row{
+    display:flex; gap:8px;
+    margin:8px 16px 4px;
+  }
+  .drawer-share-btn{
+    flex:1;
+    padding:10px 6px;
+    border-radius:10px;
+    border:1px solid var(--panel-edge);
+    background: var(--panel);
+    color: var(--accent);
+    font-size:12px;
+    font-weight:600;
+  }
+  .drawer-share-btn:active{ background: var(--panel-edge); }
+  #fullscreenToggle.on{ background: var(--accent); color:#08110f; }
+  #importPreview{ min-height: 16px; }
+  .bpm-detect-btn{
+    width:100%;
+    padding:10px;
+    border-radius:10px;
+    border:1px solid var(--panel-edge);
+    background: var(--panel);
+    color: var(--accent);
+    font-size:12.5px;
+    font-weight:600;
+  }
+  .bpm-detect-btn:active{ background: var(--panel-edge); }
+  .bpm-detect-btn:disabled{ opacity:0.5; }
+  .bpm-detect-status{
+    font-size:11.5px;
+    color: var(--muted);
+    margin-top:6px;
+    min-height:14px;
+  }
+  .bpm-detect-status.ok{ color: var(--accent); }
+  .bpm-detect-status.err{ color: var(--danger); }
+
+  .chord-convert-panel{ margin-top:10px; display:flex; flex-direction:column; gap:8px; }
+  .chord-convert-panel textarea{
+    width:100%; background: var(--panel); border:1px solid var(--panel-edge);
+    border-radius:10px; color: var(--lyric); padding:10px 12px;
+    font-size:13px; font-family: var(--font-chord); min-height:140px; line-height:1.5;
+  }
+  .chord-convert-panel textarea::placeholder{ color: var(--muted); opacity:0.7; }
+  .chord-convert-actions{ display:flex; gap:8px; }
+  .chord-convert-actions button{
+    flex:1; padding:11px; border-radius:10px; border:none;
+    font-size:13px; font-weight:600;
+  }
+  .chord-convert-hint{ font-size:11px; color: var(--muted); line-height:1.4; }
+
+  /* ---------- song editor ---------- */
+  .editor-overlay{
+    position:fixed; inset:0;
+    background: var(--stage);
+    z-index:30;
+    display:flex; flex-direction:column;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    pointer-events: none;
+  }
+  .editor-overlay.open{ transform: translateY(0); pointer-events: auto; }
+  .editor-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px; border-bottom:1px solid var(--panel-edge); flex-shrink:0;
+  }
+  .editor-head h3{ margin:0; font-family: var(--font-display); font-size:17px; color: var(--lyric); }
+  .editor-body{
+    flex:1; overflow-y:auto; padding:16px;
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .field-row{ display:flex; gap:10px; }
+  .field{ flex:1; display:flex; flex-direction:column; }
+  .field label{
+    font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color: var(--muted); margin-bottom:6px;
+  }
+  .field input, .field textarea{
+    width:100%; background: var(--panel); border:1px solid var(--panel-edge);
+    border-radius:10px; color: var(--lyric); padding:10px 12px;
+    font-size:15px; font-family: var(--font-lyric);
+  }
+  .field textarea{
+    font-family: var(--font-chord); font-size:14px;
+    min-height: 240px; line-height:1.55; resize: vertical;
+  }
+  .field textarea::placeholder{ color: var(--muted); opacity:0.7; }
+  .cue-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+  .cue-chip{
+    padding:7px 11px; border-radius:999px;
+    border:1px solid var(--panel-edge); background: var(--panel);
+    color: var(--chord); font-size:11.5px; white-space:nowrap;
+  }
+  .cue-chip:active{ background: var(--chord); color:#08110f; }
+  .editor-foot{
+    display:flex; gap:10px; flex-shrink:0;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--panel-edge);
+  }
+  .editor-foot button{
+    padding:13px; border-radius:12px; border:none;
+    font-size:14px; font-weight:600;
+  }
+  .btn-save{ background: var(--accent); color:#08110f; flex:1; }
+  .btn-delete{ background: var(--danger); color:#fff; width:52px; flex-shrink:0; }
+  .btn-cancel{ background: var(--panel-edge); color: var(--lyric); width:90px; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-block">
+    <div class="song-title" id="songTitle">Amazing Grace</div>
+    <div class="song-meta" id="songMeta">Himno · 3/4</div>
+  </div>
+  <div class="key-pill">
+    <button id="keyDown">−</button>
+    <span id="keyLabel">G</span>
+    <button id="keyUp">+</button>
+  </div>
+  <button class="ghost btn" id="settingsToggle" style="width:40px;height:40px;font-size:16px;" title="Ajustes: conexión, calibración, apariencia">⚙️</button>
+  <button class="ghost btn" id="fullscreenToggle" style="width:40px;height:40px;font-size:16px;" title="Pantalla completa">⛶</button>
+  <button class="ghost btn" id="setlistToggle" style="width:40px;height:40px;font-size:17px;">☰</button>
+</header>
+
+<div class="beat-flash" id="beatFlash"></div>
+
+<div class="song-picker" id="songPicker"></div>
+
+<div class="conn-pill" id="connPill">
+  <span id="connStatus">Sin conectar</span>
+  <span id="pingBadge" class="ping-badge"></span>
+</div>
+
+<div class="settings-overlay" id="settingsOverlay">
+  <div class="settings-panel">
+    <div class="settings-panel-header">
+      <span>Ajustes <span style="font-size:11px;opacity:0.5;font-weight:normal;">· build 33</span></span>
+      <button class="ghost btn" id="settingsCloseBtn">✕</button>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Conexión en vivo</div>
+      <div class="role-bar">
+        <div class="role-row1">
+          <div class="chip active" id="roleDirector">👑 Director</div>
+          <div class="chip" id="roleFollower">📱 Seguidor</div>
+        </div>
+        <div class="role-row2">
+          <input type="text" id="roomCode" placeholder="código de sala" maxlength="10">
+          <button class="btn" id="connectBtn">Conectar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Apariencia</div>
+      <div class="row">
+        <button class="ghost btn" id="fontDown">A−</button>
+        <button class="ghost btn" id="fontUp">A+</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Tiempos reales por sección</div>
+      <div class="row">
+        <button class="ghost btn" id="calibTimesBtn" title="Marcar cuánto dura cada sección en la canción real">🎯 Marcar tiempos</button>
+        <button class="ghost btn" id="detectSectionsBtn" title="Proponer duraciones de sección analizando un audio">🔍 Detectar por audio</button>
+        <button class="ghost btn" id="refAudioBtn" title="Escuchar el audio real de la canción para verificar los tiempos">🎧 Referencia de audio</button>
+        <input type="file" id="detectAudioInput" accept="audio/*" style="display:none;">
+        <input type="file" id="refAudioAttachInput" accept="audio/*" style="display:none;">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Voz guía</div>
+      <div class="row">
+        <button class="toggle btn on" id="voiceToggle" title="Voz guía: cuenta inicial y anuncia secciones">🗣️ Cuenta y anuncia secciones</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="stage-wrap">
+  <div class="spotlight"></div>
+  <div class="reading-line"><span class="reading-line-arrow">▶</span></div>
+  <div class="position-badge" id="positionBadge"></div>
+  <div class="calib-banner" id="calibBanner">
+    <div class="calib-text">Escuchá la canción real. Sonando ahora: <span id="calibCurrentLabel"></span>. Tocá el botón apenas cambie de parte.</div>
+    <button class="btn" id="calibNextBtn">Siguiente sección ▶</button>
+    <button class="ghost btn" id="calibCancelBtn">✕</button>
+  </div>
+  <div class="detect-panel" id="detectPanel">
+    <div class="detect-header" id="detectHeader">Secciones detectadas — ajustá si hace falta</div>
+    <div class="detect-list" id="detectList"></div>
+    <div class="detect-actions">
+      <button class="btn" id="detectConfirmBtn">Usar estos tiempos</button>
+      <button class="ghost btn" id="detectCancelBtn">Cancelar</button>
+    </div>
+  </div>
+  <div class="detect-panel" id="refAudioPanel">
+    <div class="detect-header">🎧 Audio de referencia — <span id="refAudioSongTitle"></span></div>
+    <div id="refAudioEmpty" class="ref-audio-empty">
+      No hay audio guardado para esta canción todavía.
+      <button class="btn" id="refAudioAttachBtn">Adjuntar audio</button>
+    </div>
+    <div id="refAudioLoaded" class="ref-audio-loaded">
+      <audio id="refAudioEl" controls style="width:100%"></audio>
+      <div class="detect-list" id="refAudioList"></div>
+      <div class="detect-actions">
+        <button class="ghost btn" id="refAudioReplaceBtn">Reemplazar audio</button>
+        <button class="ghost btn" id="refAudioRemoveBtn">🗑️ Quitar audio</button>
+      </div>
+    </div>
+    <div class="detect-actions">
+      <button class="ghost btn" id="refAudioCloseBtn">Cerrar</button>
+    </div>
+  </div>
+  <div class="follower-badge" id="followerBadge"></div>
+  <div class="count-overlay" id="countOverlay"></div>
+  <div class="cue-overlay" id="cueOverlay">
+    <div class="cue-overlay-icon" id="cueOverlayIcon"></div>
+    <div class="cue-overlay-label" id="cueOverlayLabel"></div>
+  </div>
+  <div class="conn-fallback-badge" id="connFallbackBadge">📶 Sin conexión · siguiendo por BPM</div>
+  <div class="talking-badge" id="talkingBadge">🎙️ Hablando…</div>
+  <audio id="talkAudio" autoplay playsinline style="display:none;"></audio>
+  <div class="backup-reminder" id="backupReminder">
+    💾 Hace tiempo no exportás tu repertorio como respaldo.
+    <button type="button" id="backupReminderBtn">Exportar ahora</button>
+    <button type="button" id="backupReminderDismiss">✕</button>
+  </div>
+  <button class="stage-nav" id="prevSong">‹</button>
+  <button class="stage-nav" id="nextSong">›</button>
+  <div id="lyrics"></div>
+</div>
+
+<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head">
+    <h3>Setlist</h3>
+    <button class="drawer-close" id="drawerClose">✕</button>
+  </div>
+  <div class="drawer-list" id="drawerList"></div>
+  <button class="drawer-add" id="addSongBtn">＋ Nueva canción</button>
+  <div class="drawer-share-row">
+    <button class="drawer-share-btn" id="exportBtn">⇪ Exportar repertorio</button>
+    <button class="drawer-share-btn" id="importBtn">⇩ Importar repertorio</button>
+  </div>
+  <button class="drawer-reset" id="resetBtn">Restaurar canciones de ejemplo</button>
+  <button class="drawer-reset" id="storageDiagBtn" style="margin-top:8px;">🔎 Ver todo lo guardado en este navegador</button>
+</div>
+
+<div class="editor-overlay" id="importOverlay">
+  <div class="editor-head">
+    <h3>Importar repertorio</h3>
+    <button class="drawer-close" id="importClose">✕</button>
+  </div>
+  <div class="editor-body">
+    <div class="field" style="flex:1;">
+      <label>Pega aquí el texto que te compartió otro músico</label>
+      <textarea id="importText" placeholder="### Título: Nombre de la canción&#10;### Tono: G&#10;### Descripción: ...&#10;## Verso 1&#10;[G]Letra con acordes...&#10;&#10;### Título: Siguiente canción&#10;..."></textarea>
+    </div>
+    <div id="importPreview" style="font-size:12px;color:var(--muted);"></div>
+  </div>
+  <div class="editor-foot">
+    <button class="btn-cancel" id="importCancel">Cancelar</button>
+    <button class="btn-save" id="importConfirm">Agregar a mi repertorio</button>
+  </div>
+</div>
+
+<div class="editor-overlay" id="editorOverlay">
+  <div class="editor-head">
+    <h3 id="editorTitleLabel">Nueva canción</h3>
+    <button class="drawer-close" id="editorClose">✕</button>
+  </div>
+  <div class="editor-body">
+    <div class="field-row">
+      <div class="field" style="flex:2">
+        <label>Título</label>
+        <input type="text" id="editTitle" placeholder="Nombre de la canción">
+      </div>
+      <div class="field" style="flex:1">
+        <label>Tono</label>
+        <input type="text" id="editKey" placeholder="G" maxlength="3">
+      </div>
+      <div class="field" style="flex:1">
+        <label>BPM</label>
+        <input type="number" id="editBpm" placeholder="80" min="30" max="260">
+      </div>
+    </div>
+    <div class="field">
+      <button type="button" class="bpm-detect-btn" id="bpmDetectBtn">🎧 Detectar BPM de un audio</button>
+      <input type="file" id="bpmAudioInput" accept="audio/*" style="display:none;">
+      <div id="bpmDetectStatus" class="bpm-detect-status"></div>
+    </div>
+    <div class="field">
+      <label>Descripción</label>
+      <input type="text" id="editMeta" placeholder="Autor, género, notas...">
+    </div>
+    <div class="field">
+      <button type="button" class="bpm-detect-btn" id="chordConvertToggleBtn">🎸 Pegar "acordes arriba" (Cifra Club / Ultimate Guitar) y convertir</button>
+      <div id="chordConvertPanel" class="chord-convert-panel" style="display:none;">
+        <div class="chord-convert-hint">Pegá el texto tal cual lo copiaste, con el acorde arriba de la letra. Se agrega al final de "Letra y acordes" — revisá el resultado antes de guardar.</div>
+        <textarea id="chordConvertInput" placeholder="   Am        F
+Me enamora tu manera de ser"></textarea>
+        <div class="chord-convert-actions">
+          <button type="button" class="btn-cancel" id="chordConvertCancel">Cancelar</button>
+          <button type="button" class="btn-save" id="chordConvertApply">Convertir y agregar</button>
+        </div>
+        <div id="chordConvertStatus" class="bpm-detect-status"></div>
+      </div>
+    </div>
+    <div class="field" style="flex:1;">
+      <label>Letra y acordes</label>
+      <div class="cue-chips" id="cueChips">
+        <button type="button" class="cue-chip" data-cue="Cuenta: 1, 2, 3, 4">🥁 Cuenta 1-2-3-4</button>
+        <button type="button" class="cue-chip" data-cue="Pre-coro">➡️ Precoro</button>
+        <button type="button" class="cue-chip" data-cue="Solo de guitarra">🎸 Solo guitarra</button>
+        <button type="button" class="cue-chip" data-cue="Instrumental">🎵 Instrumental</button>
+        <button type="button" class="cue-chip" data-cue="Silencio / break">⏸ Silencio</button>
+      </div>
+      <textarea id="editBody" placeholder="## Verso 1&#10;[G]Escribe tu letra [C]así, con los acordes [D]entre corchetes&#10;&#10;!Solo de guitarra (4 compases)&#10;&#10;## Coro&#10;[C]Cada línea nueva [G]es un renglón de la canción&#10;&#10;Usa ! al inicio de una línea para indicaciones (precoro, solos, cuentas) en vez de letra"></textarea>
+    </div>
+  </div>
+  <div class="editor-foot">
+    <button class="btn-cancel" id="editorCancel">Cancelar</button>
+    <button class="btn-save" id="editorSave">Guardar</button>
+    <button class="btn-delete" id="editorDelete" style="display:none;">🗑</button>
+  </div>
+</div>
+
+<footer>
+  <div class="row">
+    <button class="ghost btn" id="restartBtn" title="Volver al inicio de la canción">⟲</button>
+    <button class="play-btn" id="scrollToggle">▶</button>
+    <div class="slider-block">
+      <div class="slider-label"><span id="speedLabel">Velocidad de scroll</span><span id="speedVal">4</span></div>
+      <input type="range" id="speedSlider" min="1" max="40" value="4">
+      <div class="speed-readout" id="speedReadout"></div>
+    </div>
+    <button class="toggle btn" id="syncToggle" title="Sincronizar scroll con el BPM">🔗</button>
+  </div>
+  <div class="row">
+    <div class="bpm-block">
+      <button class="bpm-tap" id="tapTempo">TAP<div class="dot" id="tapDot"></div></button>
+      <span class="bpm-num" id="bpmNum">80</span>
+      <span style="font-size:10px;color:var(--muted);text-transform:uppercase;">bpm</span>
+    </div>
+    <button class="toggle btn" id="metroToggle">🔔</button>
+  </div>
+  <div class="row cue-row" id="cueRow">
+    <button class="cue-btn" data-cue="solo" data-icon="🎸" data-label="SOLO"><span class="cue-icon">🎸</span>Solo</button>
+    <button class="cue-btn" data-cue="final" data-icon="🏁" data-label="FINAL"><span class="cue-icon">🏁</span>Final</button>
+    <button class="cue-btn" data-cue="corte" data-icon="✂️" data-label="CORTE"><span class="cue-icon">✂️</span>Corte</button>
+    <button class="cue-btn" data-cue="repetir" data-icon="🔁" data-label="REPETIR"><span class="cue-icon">🔁</span>Repetir</button>
+    <button class="cue-btn" data-cue="atencion" data-icon="⚠️" data-label="ATENCIÓN"><span class="cue-icon">⚠️</span>Atención</button>
+  </div>
+  <div class="row talk-row" id="talkRow">
+    <button class="talk-btn-wide" id="talkBtn"><span class="cue-icon">🎙️</span> Mantener para hablar</button>
+  </div>
+  </footer>
+
+<script src="https://unpkg.com/peerjs@1/dist/peerjs.min.js"></script>
+<script>
+window.addEventListener('error', function(e){
+  var banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#c0392b;color:#fff;padding:10px 14px;font-size:12px;font-family:monospace;white-space:pre-wrap;z-index:99999;line-height:1.5;';
+  banner.textContent = '⚠️ Error de la app: ' + e.message + '\n(archivo: ' + (e.filename ? e.filename.split('/').pop() : '?') + ', línea ' + e.lineno + ')\nToma captura de esto y compártelo.';
+  document.body.appendChild(banner);
+});
+(function(){
+  // ---------- demo song data (formato: [Acorde]texto) ----------
+  var DEFAULT_SONGS = [
+    {
+      title: "Amazing Grace",
+      meta: "Himno tradicional · dominio público",
+      key: "G",
+      bpm: 72,
+      sections: [
+        { label: "Verso 1", lines: [
+          "[G]Amazing [G7]grace, how [C]sweet the [G]sound",
+          "That [G]saved a [Em]wretch like [D]me",
+          "I [G]once was [G7]lost, but [C]now am [G]found",
+          "Was [Em]blind, but [D]now I [G]see"
+        ]},
+        { label: "Verso 2", lines: [
+          "[G]'Twas grace that [G7]taught my [C]heart to [G]fear",
+          "And [G]grace my [Em]fears re[D]lieved",
+          "How [G]precious [G7]did that [C]grace ap[G]pear",
+          "The [Em]hour I [D]first be[G]lieved"
+        ]}
+      ]
+    },
+    {
+      title: "Noche de Ensayo",
+      meta: "Demo original · pop-balada",
+      key: "C",
+      bpm: 92,
+      sections: [
+        { label: "Intro", lines: [
+          "!Cuenta: 1, 2, 3, 4",
+          "!Solo de guitarra (4 compases)"
+        ]},
+        { label: "Verso", lines: [
+          "[C]Otra vez la [Am]sala está en [F]silencio [G]ya",
+          "[C]Solo el eco [Am]de un acor[F]de más se [G]va"
+        ]},
+        { label: "Pre-coro", lines: [
+          "!Pre-coro",
+          "[Dm]Sube la luz, [G]algo va a pa[C]sar"
+        ]},
+        { label: "Coro", lines: [
+          "[F]Vamos a [G]ensayar [Em]una vez [Am]más",
+          "[F]Hasta que la [G]luz nos [C]lleve a la [C]verdad"
+        ]}
+      ]
+    },
+    {
+      title: "Camino Largo",
+      meta: "Demo original · rock ligero",
+      key: "E",
+      bpm: 118,
+      sections: [
+        { label: "Intro / Verso", lines: [
+          "[E]Un camino [B]largo, un [C#m]paso a la [A]vez",
+          "[E]No hay pris[B]a si sa[C#m]bemos a dón[A]de ir"
+        ]},
+        { label: "Coro", lines: [
+          "[A]Sigue, si[B]gue, no te [C#m]detengas [A]hoy",
+          "[A]Sigue, si[B]gue, la luz [E]ya se ve"
+        ]}
+      ]
+    }
+  ];
+
+  var STORAGE_KEY = 'modoConciertoData_v1';
+  function cloneSongs(list){ return JSON.parse(JSON.stringify(list)); }
+  function loadPersisted(){
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch(e){ return null; }
+  }
+  function persist(){
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        songs: songs,
+        songIndex: state.songIndex,
+        fontSize: state.fontSize,
+        voiceGuideOn: state.voiceGuideOn,
+        syncBpm: state.syncBpm
+      }));
+    } catch(e){ /* almacenamiento lleno o no disponible: se ignora */ }
+  }
+
+  var persisted = loadPersisted();
+  var songs = (persisted && persisted.songs && persisted.songs.length) ? persisted.songs : cloneSongs(DEFAULT_SONGS);
+  function genSongId(){ return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  // toda canción necesita un id estable (no el índice: el repertorio se
+  // puede reordenar) para poder asociar su audio de referencia guardado en
+  // IndexedDB. Las canciones viejas persistidas antes de esta versión no
+  // tienen id todavía, así que se les asigna uno acá al cargar.
+  songs.forEach(function(s){ if (!s.id) s.id = genSongId(); });
+
+  // ---------- audio de referencia por canción, guardado en IndexedDB ----------
+  // no usa localStorage: un MP3 completo pesa varios MB y localStorage tiene
+  // un límite chico (unos 5-10MB en total, para TODO el sitio) — con 2 o 3
+  // canciones ya se llenaría. IndexedDB no tiene ese límite práctico.
+  var AUDIO_DB_NAME = 'modoConciertoAudioDB';
+  var AUDIO_STORE = 'refAudio';
+  var audioDbPromise = null;
+  function openAudioDB(){
+    if (audioDbPromise) return audioDbPromise;
+    audioDbPromise = new Promise(function(resolve, reject){
+      if (!window.indexedDB){ reject(new Error('IndexedDB no disponible en este navegador')); return; }
+      var req = indexedDB.open(AUDIO_DB_NAME, 1);
+      req.onupgradeneeded = function(){ req.result.createObjectStore(AUDIO_STORE); };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    });
+    return audioDbPromise;
+  }
+  function saveSongAudioBlob(songId, blob){
+    return openAudioDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(AUDIO_STORE, 'readwrite');
+        tx.objectStore(AUDIO_STORE).put(blob, songId);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+  function getSongAudioBlob(songId){
+    return openAudioDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(AUDIO_STORE, 'readonly');
+        var req = tx.objectStore(AUDIO_STORE).get(songId);
+        req.onsuccess = function(){ resolve(req.result || null); };
+        req.onerror = function(){ reject(req.error); };
+      });
+    });
+  }
+  function deleteSongAudioBlob(songId){
+    return openAudioDB().then(function(db){
+      return new Promise(function(resolve, reject){
+        var tx = db.transaction(AUDIO_STORE, 'readwrite');
+        tx.objectStore(AUDIO_STORE).delete(songId);
+        tx.oncomplete = function(){ resolve(); };
+        tx.onerror = function(){ reject(tx.error); };
+      });
+    });
+  }
+
+  function resetToDefaults(){
+    if (!window.confirm('Esto reemplaza tu repertorio actual por las 3 canciones de ejemplo. ¿Continuar?')) return;
+    // sin esto, el audio de referencia de las canciones que se van del
+    // repertorio quedaba huérfano en IndexedDB para siempre (nadie vuelve a
+    // pedirlo por ese id, pero tampoco se borra solo)
+    songs.forEach(function(s){ if (s.id) deleteSongAudioBlob(s.id).catch(function(){}); });
+    songs.length = 0;
+    cloneSongs(DEFAULT_SONGS).forEach(function(s){ s.id = genSongId(); songs.push(s); });
+    state.songIndex = 0;
+    state.semis = 0;
+    applySongBpm(songs[0]);
+    persist();
+    renderAll();
+    broadcastFull();
+  }
+
+  var NOTES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  var FLAT_TO_SHARP = { "Db":"C#","Eb":"D#","Gb":"F#","Ab":"G#","Bb":"A#","Cb":"B","Fb":"E" };
+
+  function noteIndex(n){
+    if (FLAT_TO_SHARP[n] !== undefined) n = FLAT_TO_SHARP[n];
+    return NOTES_SHARP.indexOf(n);
+  }
+
+  function transposeToken(root, semis){
+    var idx = noteIndex(root);
+    if (idx === -1) return root;
+    var ni = ((idx + semis) % 12 + 12) % 12;
+    return NOTES_SHARP[ni];
+  }
+
+  function transposeChord(chord, semis){
+    if (semis === 0) return chord;
+    var parts = chord.split("/");
+    var out = parts.map(function(part){
+      var m = part.match(/^([A-G])([#b]?)(.*)$/);
+      if (!m) return part;
+      var root = m[1] + m[2];
+      var rest = m[3];
+      return transposeToken(root, semis) + rest;
+    });
+    return out.join("/");
+  }
+
+  // ---------- parse a lyric+chord line into stacked groups ----------
+  function parseLine(line){
+    var re = /(\[[^\]]+\])/g;
+    var parts = line.split(re);
+    var groups = [];
+    var current = { chord: "", text: "" };
+    parts.forEach(function(p){
+      if (!p) return;
+      var m = p.match(/^\[([^\]]+)\]$/);
+      if (m){
+        if (current.text || current.chord) groups.push(current);
+        current = { chord: m[1], text: "" };
+      } else {
+        current.text += p;
+      }
+    });
+    if (current.text || current.chord) groups.push(current);
+    return groups;
+  }
+
+  // ---------- state ----------
+  var state = {
+    songIndex: 0,
+    semis: 0,
+    fontSize: 26,
+    scrolling: false,
+    speed: 4,
+    bpm: 80,
+    metroOn: false,
+    tapTimes: [],
+    syncBpm: false,
+    pxPerBeat: 32,
+    voiceGuideOn: true,
+    counting: false,
+    role: 'director',
+    roomCode: '',
+    peer: null,
+    conns: [],
+    scrollConns: [],
+    followerConn: null,
+    followerScrollConn: null,
+    remoteSong: null,
+    connected: false,
+    hasConnectedOnce: false,
+    localFallback: false,
+    pingMs: null,
+    scrollTargetTop: null,
+    localAudioTrack: null,
+    localAudioStream: null,
+    talkCallsOut: {},
+    followerTalkCall: null,
+    editingIndex: -1
+  };
+
+  if (persisted){
+    if (persisted.fontSize) state.fontSize = persisted.fontSize;
+    if (typeof persisted.songIndex === 'number' && persisted.songIndex < songs.length) state.songIndex = persisted.songIndex;
+    if (typeof persisted.voiceGuideOn === 'boolean') state.voiceGuideOn = persisted.voiceGuideOn;
+    if (typeof persisted.syncBpm === 'boolean') state.syncBpm = persisted.syncBpm;
+  }
+
+  var el = {
+    songTitle: document.getElementById('songTitle'),
+    songMeta: document.getElementById('songMeta'),
+    keyLabel: document.getElementById('keyLabel'),
+    keyUp: document.getElementById('keyUp'),
+    keyDown: document.getElementById('keyDown'),
+    picker: document.getElementById('songPicker'),
+    lyrics: document.getElementById('lyrics'),
+    scrollToggle: document.getElementById('scrollToggle'),
+    speedSlider: document.getElementById('speedSlider'),
+    speedReadout: document.getElementById('speedReadout'),
+    speedVal: document.getElementById('speedVal'),
+    speedLabel: document.getElementById('speedLabel'),
+    syncToggle: document.getElementById('syncToggle'),
+    fontUp: document.getElementById('fontUp'),
+    fontDown: document.getElementById('fontDown'),
+    tapTempo: document.getElementById('tapTempo'),
+    tapDot: document.getElementById('tapDot'),
+    bpmNum: document.getElementById('bpmNum'),
+    metroToggle: document.getElementById('metroToggle'),
+    voiceToggle: document.getElementById('voiceToggle'),
+    beatFlash: document.getElementById('beatFlash'),
+    positionBadge: document.getElementById('positionBadge'),
+    followerBadge: document.getElementById('followerBadge'),
+    restartBtn: document.getElementById('restartBtn'),
+    roleDirector: document.getElementById('roleDirector'),
+    roleFollower: document.getElementById('roleFollower'),
+    roomCode: document.getElementById('roomCode'),
+    connectBtn: document.getElementById('connectBtn'),
+    connStatus: document.getElementById('connStatus'),
+    pingBadge: document.getElementById('pingBadge'),
+    backupReminder: document.getElementById('backupReminder'),
+    backupReminderBtn: document.getElementById('backupReminderBtn'),
+    backupReminderDismiss: document.getElementById('backupReminderDismiss'),
+    setlistToggle: document.getElementById('setlistToggle'),
+    settingsToggle: document.getElementById('settingsToggle'),
+    settingsOverlay: document.getElementById('settingsOverlay'),
+    settingsCloseBtn: document.getElementById('settingsCloseBtn'),
+    connPill: document.getElementById('connPill'),
+    prevSong: document.getElementById('prevSong'),
+    nextSong: document.getElementById('nextSong'),
+    drawer: document.getElementById('drawer'),
+    drawerOverlay: document.getElementById('drawerOverlay'),
+    drawerClose: document.getElementById('drawerClose'),
+    drawerList: document.getElementById('drawerList'),
+    addSongBtn: document.getElementById('addSongBtn'),
+    editorOverlay: document.getElementById('editorOverlay'),
+    editorTitleLabel: document.getElementById('editorTitleLabel'),
+    editorClose: document.getElementById('editorClose'),
+    editorCancel: document.getElementById('editorCancel'),
+    editorSave: document.getElementById('editorSave'),
+    editorDelete: document.getElementById('editorDelete'),
+    editTitle: document.getElementById('editTitle'),
+    editKey: document.getElementById('editKey'),
+    editBpm: document.getElementById('editBpm'),
+    bpmDetectBtn: document.getElementById('bpmDetectBtn'),
+    bpmAudioInput: document.getElementById('bpmAudioInput'),
+    bpmDetectStatus: document.getElementById('bpmDetectStatus'),
+    editMeta: document.getElementById('editMeta'),
+    editBody: document.getElementById('editBody'),
+    chordConvertToggleBtn: document.getElementById('chordConvertToggleBtn'),
+    chordConvertPanel: document.getElementById('chordConvertPanel'),
+    chordConvertInput: document.getElementById('chordConvertInput'),
+    chordConvertCancel: document.getElementById('chordConvertCancel'),
+    chordConvertApply: document.getElementById('chordConvertApply'),
+    chordConvertStatus: document.getElementById('chordConvertStatus'),
+    fullscreenToggle: document.getElementById('fullscreenToggle'),
+    countOverlay: document.getElementById('countOverlay'),
+    cueRow: document.getElementById('cueRow'),
+    talkRow: document.getElementById('talkRow'),
+    cueOverlay: document.getElementById('cueOverlay'),
+    cueOverlayIcon: document.getElementById('cueOverlayIcon'),
+    cueOverlayLabel: document.getElementById('cueOverlayLabel'),
+    talkBtn: document.getElementById('talkBtn'),
+    talkingBadge: document.getElementById('talkingBadge'),
+    talkAudio: document.getElementById('talkAudio'),
+    calibTimesBtn: document.getElementById('calibTimesBtn'),
+    calibBanner: document.getElementById('calibBanner'),
+    calibCurrentLabel: document.getElementById('calibCurrentLabel'),
+    calibNextBtn: document.getElementById('calibNextBtn'),
+    calibCancelBtn: document.getElementById('calibCancelBtn'),
+    detectSectionsBtn: document.getElementById('detectSectionsBtn'),
+    detectAudioInput: document.getElementById('detectAudioInput'),
+    detectPanel: document.getElementById('detectPanel'),
+    detectHeader: document.getElementById('detectHeader'),
+    detectList: document.getElementById('detectList'),
+    detectConfirmBtn: document.getElementById('detectConfirmBtn'),
+    detectCancelBtn: document.getElementById('detectCancelBtn'),
+    refAudioBtn: document.getElementById('refAudioBtn'),
+    refAudioAttachInput: document.getElementById('refAudioAttachInput'),
+    refAudioPanel: document.getElementById('refAudioPanel'),
+    refAudioSongTitle: document.getElementById('refAudioSongTitle'),
+    refAudioEmpty: document.getElementById('refAudioEmpty'),
+    refAudioLoaded: document.getElementById('refAudioLoaded'),
+    refAudioEl: document.getElementById('refAudioEl'),
+    refAudioList: document.getElementById('refAudioList'),
+    refAudioAttachBtn: document.getElementById('refAudioAttachBtn'),
+    refAudioReplaceBtn: document.getElementById('refAudioReplaceBtn'),
+    refAudioRemoveBtn: document.getElementById('refAudioRemoveBtn'),
+    refAudioCloseBtn: document.getElementById('refAudioCloseBtn'),
+    connFallbackBadge: document.getElementById('connFallbackBadge'),
+    exportBtn: document.getElementById('exportBtn'),
+    importBtn: document.getElementById('importBtn'),
+    importOverlay: document.getElementById('importOverlay'),
+    importClose: document.getElementById('importClose'),
+    importCancel: document.getElementById('importCancel'),
+    importConfirm: document.getElementById('importConfirm'),
+    importText: document.getElementById('importText'),
+    importPreview: document.getElementById('importPreview')
+  };
+
+  function currentSong(){
+    if (state.role === 'seguidor' && state.remoteSong) return state.remoteSong;
+    return songs[state.songIndex];
+  }
+
+  function renderPicker(){
+    el.picker.innerHTML = "";
+    songs.forEach(function(s, i){
+      var chip = document.createElement('div');
+      chip.className = 'chip' + (i === state.songIndex ? ' active' : '');
+      chip.textContent = s.title;
+      chip.addEventListener('click', function(){
+        goToSong(i);
+      });
+      el.picker.appendChild(chip);
+    });
+  }
+
+  // el BPM vive en cada canción; al cambiar de tema se carga solo, sin
+  // necesidad de volver a tocar TAP. Si la canción no tiene BPM guardado
+  // (repertorio viejo o importado sin ese dato), se conserva el tempo actual.
+  function applySongBpm(song){
+    if (!song || !song.bpm) return;
+    state.bpm = song.bpm;
+    el.bpmNum.textContent = state.bpm;
+    // cada canción recuerda su propia calibración de "distancia por negra"
+    // (una canción con letra más apretada necesita otro valor que una con
+    // frases más separadas, aunque compartan el mismo BPM)
+    state.pxPerBeat = song.pxPerBeat || 32;
+    if (state.syncBpm){
+      el.speedLabel.textContent = 'Distancia por negra (BPM ' + state.bpm + ')';
+      el.speedSlider.value = Math.round(state.pxPerBeat / 8);
+      el.speedVal.textContent = el.speedSlider.value;
+    }
+    updateSpeedReadout();
+  }
+
+  function goToSong(i){
+    if (calibState) cancelCalibration();
+    if (typeof closeDetectPanel === 'function' && detectProposal && detectProposal.length) closeDetectPanel();
+    if (typeof closeRefAudioPanel === 'function' && el.refAudioPanel.classList.contains('show')) closeRefAudioPanel();
+    resetBlockState();
+    state.songIndex = i;
+    state.semis = 0;
+    lastAnnouncedSection = null;
+    applySongBpm(songs[i]);
+    renderAll();
+    broadcastFull();
+    persist();
+  }
+
+  function moveSong(i, dir){
+    var j = i + dir;
+    if (j < 0 || j >= songs.length) return;
+    var tmp = songs[i]; songs[i] = songs[j]; songs[j] = tmp;
+    if (state.songIndex === i) state.songIndex = j;
+    else if (state.songIndex === j) state.songIndex = i;
+    renderAll();
+    persist();
+  }
+
+  function renderDrawer(){
+    el.drawerList.innerHTML = "";
+    songs.forEach(function(s, i){
+      var item = document.createElement('div');
+      item.className = 'drawer-item' + (i === state.songIndex ? ' current' : '');
+
+      var badge = document.createElement('div');
+      badge.className = 'drawer-badge';
+      badge.textContent = i + 1;
+
+      var info = document.createElement('div');
+      info.className = 'drawer-info';
+      var t = document.createElement('div'); t.className = 't'; t.textContent = s.title;
+      var k = document.createElement('div'); k.className = 'k'; k.textContent = 'Tono ' + s.key;
+      info.appendChild(t); info.appendChild(k);
+
+      var editBtn = document.createElement('button');
+      editBtn.className = 'drawer-edit';
+      editBtn.textContent = '✎';
+      editBtn.addEventListener('click', function(ev){ ev.stopPropagation(); openEditor(i); });
+
+      var reorder = document.createElement('div');
+      reorder.className = 'drawer-reorder';
+      var up = document.createElement('button'); up.textContent = '▲';
+      var down = document.createElement('button'); down.textContent = '▼';
+      up.addEventListener('click', function(ev){ ev.stopPropagation(); moveSong(i, -1); });
+      down.addEventListener('click', function(ev){ ev.stopPropagation(); moveSong(i, 1); });
+      reorder.appendChild(up); reorder.appendChild(down);
+
+      item.appendChild(badge);
+      item.appendChild(info);
+      item.appendChild(editBtn);
+      item.appendChild(reorder);
+      item.addEventListener('click', function(){ goToSong(i); closeDrawer(); });
+      el.drawerList.appendChild(item);
+    });
+  }
+
+  function updateNav(){
+    el.prevSong.disabled = state.songIndex <= 0;
+    el.nextSong.disabled = state.songIndex >= songs.length - 1;
+  }
+
+  function openDrawer(){ el.drawer.classList.add('open'); el.drawerOverlay.classList.add('open'); }
+  function closeDrawer(){ el.drawer.classList.remove('open'); el.drawerOverlay.classList.remove('open'); }
+  el.setlistToggle.addEventListener('click', openDrawer);
+
+  // ---------- panel de ajustes (conexión, apariencia, calibración, voz) ----------
+  // todo esto se configura una vez, no durante el show — vive escondido acá
+  // para que la pantalla principal se mantenga simple mientras se toca.
+  function openSettings(){ el.settingsOverlay.classList.add('show'); }
+  function closeSettings(){ el.settingsOverlay.classList.remove('show'); }
+  el.settingsToggle.addEventListener('click', openSettings);
+  el.settingsCloseBtn.addEventListener('click', closeSettings);
+  el.settingsOverlay.addEventListener('click', function(e){
+    if (e.target === el.settingsOverlay) closeSettings();
+  });
+  el.connPill.addEventListener('click', openSettings);
+  el.drawerClose.addEventListener('click', closeDrawer);
+  el.drawerOverlay.addEventListener('click', closeDrawer);
+  el.prevSong.addEventListener('click', function(){ if (state.songIndex > 0) goToSong(state.songIndex - 1); });
+  el.nextSong.addEventListener('click', function(){ if (state.songIndex < songs.length - 1) goToSong(state.songIndex + 1); });
+
+  // ---------- editor de canciones ----------
+  function songToText(song){
+    return song.sections.map(function(sec){
+      return "## " + sec.label + "\n" + sec.lines.join("\n");
+    }).join("\n\n");
+  }
+
+  function parseSongText(text){
+    var lines = text.split("\n");
+    var sections = [];
+    var current = { label: "Verso 1", lines: [] };
+    lines.forEach(function(raw){
+      var trimmed = raw.trim();
+      if (!trimmed) return;
+      var mLabel = trimmed.match(/^##\s*(.+)/);
+      if (mLabel){
+        if (current.lines.length) sections.push(current);
+        current = { label: mLabel[1], lines: [] };
+      } else {
+        current.lines.push(raw);
+      }
+    });
+    if (current.lines.length) sections.push(current);
+    return sections;
+  }
+
+  // ---------- convertir "acordes arriba de la letra" a formato [Acorde]inline ----------
+  // Heurística de "mejor esfuerzo": revisar el resultado antes de guardar.
+  function chordTokenRegex(){
+    return /^[A-G](#|b)?(maj7|maj9|maj|min7|min9|min|dim7|dim|aug|sus2|sus4|sus|add9|add11|add2|add|6\/9|69|6|7sus4|7b5|7#5|7|9|11|13|m7b5|m9|m7|m6|m)?(\/[A-G](#|b)?)?$/;
+  }
+  function isChordLine(line){
+    var trimmed = line.trim();
+    if (!trimmed) return false;
+    var tokens = trimmed.split(/\s+/);
+    if (!tokens.length || tokens.length > 10) return false;
+    var re = chordTokenRegex();
+    for (var i = 0; i < tokens.length; i++){
+      if (!re.test(tokens[i])) return false;
+    }
+    return true;
+  }
+  function findChordPositions(line){
+    var re = /\S+/g;
+    var out = [];
+    var m;
+    while ((m = re.exec(line))){ out.push({ chord: m[0], index: m.index }); }
+    return out;
+  }
+  function mergeChordAndLyric(chordLine, lyricLine){
+    var chords = findChordPositions(chordLine);
+    chords.sort(function(a, b){ return b.index - a.index; }); // insertar de atrás hacia adelante
+    var result = lyricLine;
+    chords.forEach(function(c){
+      var idx = Math.min(c.index, result.length);
+      result = result.slice(0, idx) + "[" + c.chord + "]" + result.slice(idx);
+    });
+    return result;
+  }
+  function convertChordsAboveLyrics(text){
+    var rawLines = text.replace(/\r\n/g, "\n").split("\n");
+    var out = [];
+    var i = 0;
+    while (i < rawLines.length){
+      var line = rawLines[i];
+      if (isChordLine(line)){
+        var next = rawLines[i + 1];
+        if (next !== undefined && next.trim() !== "" && !isChordLine(next)){
+          out.push(mergeChordAndLyric(line, next));
+          i += 2;
+          continue;
+        } else {
+          var chords = findChordPositions(line).map(function(c){ return c.chord; });
+          out.push("!" + chords.join(" - "));
+          i += 1;
+          continue;
+        }
+      } else {
+        out.push(line);
+        i += 1;
+      }
+    }
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+  el.chordConvertToggleBtn.addEventListener('click', function(){
+    var open = el.chordConvertPanel.style.display !== 'none';
+    el.chordConvertPanel.style.display = open ? 'none' : 'flex';
+  });
+  el.chordConvertCancel.addEventListener('click', function(){
+    el.chordConvertInput.value = "";
+    el.chordConvertStatus.textContent = "";
+    el.chordConvertPanel.style.display = 'none';
+  });
+  el.chordConvertApply.addEventListener('click', function(){
+    var raw = el.chordConvertInput.value;
+    if (!raw.trim()){
+      el.chordConvertStatus.textContent = 'Pegá primero el texto con acordes arriba de la letra.';
+      el.chordConvertStatus.className = 'bpm-detect-status err';
+      return;
+    }
+    var converted = convertChordsAboveLyrics(raw);
+    var current = el.editBody.value;
+    var needsSectionLabel = !/^\s*##/.test(converted);
+    var block = (needsSectionLabel ? "## Verso\n" : "") + converted;
+    el.editBody.value = current.trim() ? (current.replace(/\s+$/, "") + "\n\n" + block) : block;
+    el.chordConvertInput.value = "";
+    el.chordConvertStatus.textContent = 'Agregado. Revisá los acordes y ajustá los nombres de sección (## Verso, ## Coro...) si hace falta.';
+    el.chordConvertStatus.className = 'bpm-detect-status ok';
+    el.chordConvertPanel.style.display = 'none';
+  });
+
+  function openEditor(i){
+    state.editingIndex = i;
+    el.bpmDetectStatus.textContent = '';
+    el.bpmDetectStatus.className = 'bpm-detect-status';
+    el.chordConvertPanel.style.display = 'none';
+    el.chordConvertInput.value = '';
+    el.chordConvertStatus.textContent = '';
+    if (i === -1){
+      el.editorTitleLabel.textContent = "Nueva canción";
+      el.editTitle.value = "";
+      el.editKey.value = "";
+      el.editBpm.value = state.bpm;
+      el.editMeta.value = "";
+      el.editBody.value = "";
+      el.editorDelete.style.display = "none";
+    } else {
+      var s = songs[i];
+      el.editorTitleLabel.textContent = "Editar canción";
+      el.editTitle.value = s.title;
+      el.editKey.value = s.key;
+      el.editBpm.value = s.bpm || "";
+      el.editMeta.value = s.meta;
+      el.editBody.value = songToText(s);
+      el.editorDelete.style.display = songs.length > 1 ? "block" : "none";
+    }
+    el.editorOverlay.classList.add('open');
+  }
+  function closeEditor(){ el.editorOverlay.classList.remove('open'); }
+
+  el.addSongBtn.addEventListener('click', function(){ closeDrawer(); openEditor(-1); });
+  el.editorClose.addEventListener('click', closeEditor);
+  el.editorCancel.addEventListener('click', closeEditor);
+  document.getElementById('resetBtn').addEventListener('click', resetToDefaults);
+  // diagnóstico de emergencia: muestra TODO lo que hay guardado en
+  // localStorage para este sitio, no solo lo que esta versión de la app
+  // sabe leer — si el repertorio real quedó guardado bajo otro nombre de
+  // clave (de una versión vieja), esto lo deja a la vista para poder
+  // recuperarlo a mano en vez de darlo por perdido.
+  document.getElementById('storageDiagBtn').addEventListener('click', function(){
+    var keys = [];
+    try { for (var i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i)); } catch(e){}
+    if (!keys.length){
+      window.alert('No hay nada guardado en localStorage para este sitio.');
+      return;
+    }
+    var lines = keys.map(function(k){
+      var val = '';
+      try { val = localStorage.getItem(k) || ''; } catch(e){}
+      var extra = '';
+      try {
+        var parsed = JSON.parse(val);
+        if (parsed && parsed.songs && parsed.songs.length){
+          extra = ' — ' + parsed.songs.length + ' canción(es): ' + parsed.songs.map(function(s){ return s.title; }).join(', ');
+        }
+      } catch(e){}
+      return '• "' + k + '" (' + val.length + ' caracteres)' + extra;
+    });
+    var msg = 'Claves guardadas en este navegador para este sitio:\n\n' + lines.join('\n\n');
+    if (keys.indexOf(STORAGE_KEY) === -1){
+      msg += '\n\n⚠️ La clave que usa esta versión de la app ("' + STORAGE_KEY + '") no aparece en la lista — por eso ves el repertorio de ejemplo. Si alguna de las de arriba tiene tus canciones reales, contale a Claude cuál es (nombre exacto entre comillas) para migrarla.';
+    }
+    window.alert(msg);
+  });
+
+  document.querySelectorAll('.cue-chip').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var ta = el.editBody;
+      var cueText = btn.getAttribute('data-cue');
+      var start = ta.selectionStart, end = ta.selectionEnd;
+      var needsLeadingBreak = start > 0 && ta.value.charAt(start - 1) !== '\n';
+      var insertText = (needsLeadingBreak ? '\n' : '') + '!' + cueText + '\n';
+      ta.value = ta.value.slice(0, start) + insertText + ta.value.slice(end);
+      var newPos = start + insertText.length;
+      ta.selectionStart = ta.selectionEnd = newPos;
+      ta.focus();
+    });
+  });
+
+  // ---------- detectar BPM a partir de un archivo de audio ----------
+  // analiza la energía del audio en bloques (algoritmo clásico de detección de
+  // golpes por energía) para estimar el tempo. Funciona mucho mejor con un
+  // archivo/pista limpia que escuchando el micrófono en vivo, porque no hay
+  // ruido de sala ni mezcla de instrumentos sin procesar.
+  function estimateBpmFromAudioBuffer(audioBuffer){
+    var sr = audioBuffer.sampleRate;
+    var data = audioBuffer.getChannelData(0);
+    var bufferSize = 1024;
+    var numBlocks = Math.floor(data.length / bufferSize);
+    if (numBlocks < 50) return null; // audio demasiado corto para analizar
+
+    var energies = new Float32Array(numBlocks);
+    for (var i = 0; i < numBlocks; i++){
+      var sum = 0;
+      var offset = i * bufferSize;
+      for (var j = 0; j < bufferSize; j++){
+        var s = data[offset + j];
+        sum += s * s;
+      }
+      energies[i] = sum;
+    }
+
+    var windowBlocks = Math.max(10, Math.round(sr / bufferSize)); // ventana ~1s de historia local
+    var minGapBlocks = Math.max(1, Math.round((60 / 300) * sr / bufferSize)); // no contar 2 golpes a menos de 200ms (tope ~300 BPM)
+    var beatTimes = [];
+    var lastBeatBlock = -minGapBlocks;
+
+    for (var i = windowBlocks; i < numBlocks; i++){
+      var sumA = 0;
+      for (var k = i - windowBlocks; k < i; k++) sumA += energies[k];
+      var avg = sumA / windowBlocks;
+      if (avg < 1e-8) continue; // silencio: no hay nada que detectar aquí
+      var varSum = 0;
+      for (var k2 = i - windowBlocks; k2 < i; k2++){ var d = energies[k2] - avg; varSum += d * d; }
+      var variance = varSum / windowBlocks;
+      var C = (-0.0025714 * variance) + 1.5142857;
+      if (C < 1.1) C = 1.1;
+      if (energies[i] > C * avg && (i - lastBeatBlock) >= minGapBlocks){
+        beatTimes.push(i * bufferSize / sr);
+        lastBeatBlock = i;
+      }
+    }
+
+    if (beatTimes.length < 8) return null; // muy pocos golpes detectados: no hay confianza suficiente
+
+    var intervals = [];
+    for (var i2 = 1; i2 < beatTimes.length; i2++) intervals.push(beatTimes[i2] - beatTimes[i2 - 1]);
+
+    var candidates = intervals.map(function(iv){
+      var bpm = 60 / iv;
+      while (bpm < 70) bpm *= 2;   // dobla/parte hasta caer en un rango musical típico
+      while (bpm > 180) bpm /= 2;
+      return bpm;
+    });
+
+    var hist = {};
+    candidates.forEach(function(b){
+      var r = Math.round(b);
+      hist[r] = (hist[r] || 0) + 1;
+    });
+    var bestBpm = null, bestCount = -1;
+    Object.keys(hist).forEach(function(k){
+      if (hist[k] > bestCount){ bestCount = hist[k]; bestBpm = parseInt(k, 10); }
+    });
+    if (!bestBpm || bestCount < 4) return null;
+    return bestBpm;
+  }
+
+  var bpmAudioCtx = null;
+  el.bpmDetectBtn.addEventListener('click', function(){
+    el.bpmAudioInput.value = '';
+    el.bpmAudioInput.click();
+  });
+  el.bpmAudioInput.addEventListener('change', function(){
+    var file = el.bpmAudioInput.files && el.bpmAudioInput.files[0];
+    if (!file) return;
+    el.bpmDetectStatus.textContent = 'Analizando audio…';
+    el.bpmDetectStatus.className = 'bpm-detect-status';
+    el.bpmDetectBtn.disabled = true;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        if (!bpmAudioCtx) bpmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        bpmAudioCtx.decodeAudioData(reader.result.slice(0), function(audioBuffer){
+          var bpm = estimateBpmFromAudioBuffer(audioBuffer);
+          el.bpmDetectBtn.disabled = false;
+          if (bpm){
+            el.editBpm.value = bpm;
+            el.bpmDetectStatus.textContent = 'Detectado: ' + bpm + ' BPM. Ajústalo si no cuadra.';
+            el.bpmDetectStatus.className = 'bpm-detect-status ok';
+          } else {
+            el.bpmDetectStatus.textContent = 'No se pudo detectar un tempo claro en este audio. Ingrésalo a mano o usa TAP.';
+            el.bpmDetectStatus.className = 'bpm-detect-status err';
+          }
+        }, function(){
+          el.bpmDetectBtn.disabled = false;
+          el.bpmDetectStatus.textContent = 'No se pudo leer ese archivo de audio. Prueba con un MP3 o WAV.';
+          el.bpmDetectStatus.className = 'bpm-detect-status err';
+        });
+      } catch (e){
+        el.bpmDetectBtn.disabled = false;
+        el.bpmDetectStatus.textContent = 'Este navegador no puede analizar audio aquí.';
+        el.bpmDetectStatus.className = 'bpm-detect-status err';
+      }
+    };
+    reader.onerror = function(){
+      el.bpmDetectBtn.disabled = false;
+      el.bpmDetectStatus.textContent = 'No se pudo leer el archivo.';
+      el.bpmDetectStatus.className = 'bpm-detect-status err';
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  // ---------- proponer duraciones de sección analizando un audio ----------
+  // esto NO "entiende" que una parte es el coro y otra la estrofa — eso es un
+  // problema mucho más difícil (segmentación estructural) que ni las
+  // herramientas profesionales resuelven perfecto. Lo que sí hace: mide la
+  // energía del sonido en el tiempo y busca los saltos más marcados (por
+  // ejemplo cuando entra la batería después de una intro tranquila, o sube
+  // el volumen general en el estribillo), y reparte esos saltos entre las
+  // secciones que ya escribiste, en el mismo orden. Siempre hay que revisar
+  // el resultado antes de confirmarlo.
+  // FFT iterativa in-place (Cooley-Tukey, tamaño potencia de 2) — necesaria
+  // para medir el CONTENIDO de frecuencias (graves/medios/agudos) de cada
+  // instante del audio, no solo el volumen. Ver más abajo por qué hace
+  // falta.
+  function fftMag(re){
+    var n = re.length;
+    var im = new Float32Array(n);
+    for (var i = 1, j = 0; i < n; i++){
+      var bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j){ var tr = re[i]; re[i]=re[j]; re[j]=tr; var ti=im[i]; im[i]=im[j]; im[j]=ti; }
+    }
+    for (var len = 2; len <= n; len <<= 1){
+      var ang = -2 * Math.PI / len;
+      var wr0 = Math.cos(ang), wi0 = Math.sin(ang);
+      var half = len >> 1;
+      for (var i2 = 0; i2 < n; i2 += len){
+        var curWr = 1, curWi = 0;
+        for (var k = 0; k < half; k++){
+          var ur = re[i2+k], ui = im[i2+k];
+          var vr = re[i2+k+half]*curWr - im[i2+k+half]*curWi;
+          var vi = re[i2+k+half]*curWi + im[i2+k+half]*curWr;
+          re[i2+k] = ur+vr; im[i2+k]=ui+vi;
+          re[i2+k+half] = ur-vr; im[i2+k+half]=ui-vi;
+          var nWr = curWr*wr0 - curWi*wi0;
+          var nWi = curWr*wi0 + curWi*wr0;
+          curWr = nWr; curWi = nWi;
+        }
+      }
+    }
+    var mag = new Float32Array(n/2 + 1);
+    for (var m = 0; m <= n/2; m++) mag[m] = Math.sqrt(re[m]*re[m] + im[m]*im[m]);
+    return mag;
+  }
+  // "forma" espectral de un instante: qué fracción de la energía está en
+  // graves/medios/agudos (8 bandas log-espaciadas), normalizada para que
+  // sume 1 — así compara TIMBRE, no volumen (dos instantes igual de fuertes
+  // pero con instrumentación distinta dan formas distintas).
+  function bandShape(segment, sr, nBands){
+    var n = segment.length;
+    var windowed = new Float32Array(n);
+    for (var i=0;i<n;i++){
+      var wv = 0.5 - 0.5*Math.cos(2*Math.PI*i/(n-1));
+      windowed[i] = segment[i]*wv;
+    }
+    var mag = fftMag(windowed);
+    var binHz = sr / n;
+    var loF = 60, hiF = sr/2;
+    var ratio = Math.pow(hiF/loF, 1/nBands);
+    var edges = [];
+    for (var b=0;b<=nBands;b++) edges.push(loF*Math.pow(ratio,b));
+    var bandsArr = new Float32Array(nBands);
+    for (var b2=0;b2<nBands;b2++){
+      var loBin = Math.max(0, Math.floor(edges[b2]/binHz));
+      var hiBin = Math.min(mag.length, Math.ceil(edges[b2+1]/binHz));
+      var sum=0;
+      for (var bi=loBin; bi<hiBin; bi++) sum += mag[bi];
+      bandsArr[b2] = sum;
+    }
+    var total=1e-9; for (var b3=0;b3<nBands;b3++) total+=bandsArr[b3];
+    for (var b4=0;b4<nBands;b4++) bandsArr[b4] /= total;
+    return bandsArr;
+  }
+  function medianOf(arr, from, to){
+    var copy = [];
+    for (var k=from;k<to;k++) copy.push(arr[k]);
+    copy.sort(function(a,b){return a-b;});
+    var m = copy.length;
+    if (!m) return 0;
+    return m % 2 ? copy[(m-1)/2] : (copy[m/2-1]+copy[m/2])/2;
+  }
+  function meanShapeInto(shapesArr, from, to, nBands, out){
+    out.fill(0);
+    for (var k=from;k<to;k++){ var sh = shapesArr[k]; for (var b=0;b<nBands;b++) out[b]+=sh[b]; }
+    var cnt = to-from;
+    for (var b2=0;b2<nBands;b2++) out[b2] /= cnt;
+  }
+  function detectSectionBoundaries(audioBuffer, numBoundaries){
+    var sr = audioBuffer.sampleRate;
+    var data = audioBuffer.getChannelData(0);
+    var frame = 4096, hop = 2048;
+    var numFrames = Math.floor((data.length - frame) / hop);
+    var totalDur = audioBuffer.duration;
+    if (numFrames < 20 || numBoundaries <= 0) return [];
+    // primer intento: se comparaba solo VOLUMEN (energía RMS) antes/después
+    // de cada punto. Probado contra una canción real (Maná, "Oye mi amor")
+    // eso fallaba: la batería mantiene el volumen bastante parejo de
+    // principio a fin, así que el mayor salto de volumen de TODA la
+    // canción terminaba siendo un platillo/golpe de batería al toque del
+    // segundo 1, no el cambio real de intro a verso (que está en el
+    // segundo ~25). Ahora se compara además el CONTENIDO de frecuencias
+    // (bandShape) — un cambio real de sección (entra la voz, cambia el
+    // instrumento) mueve dónde está la energía en el espectro aunque el
+    // volumen total no cambie mucho; un golpe de batería aislado no.
+    // Validado con esa canción real: encuentra el corte en el segundo
+    // 24.80 (el real está en el 25).
+    var nBands = 8;
+    var energies = new Float32Array(numFrames);
+    var shapes = [];
+    for (var i = 0; i < numFrames; i++){
+      var offset = i * hop, sum = 0;
+      for (var j = 0; j < frame; j++){ var s = data[offset + j]; sum += s * s; }
+      energies[i] = Math.sqrt(sum / frame);
+      shapes.push(bandShape(data.subarray(offset, offset+frame), sr, nBands));
+    }
+    var winFramesMax = Math.max(2, Math.round(4 * sr / hop));
+    var winFramesMin = Math.max(2, Math.round(1 * sr / hop));
+    var globalPeak = 0;
+    for (var pe = 0; pe < numFrames; pe++) if (energies[pe] > globalPeak) globalPeak = energies[pe];
+    var silenceFloor = globalPeak * 0.02;
+    var novelty = new Float32Array(numFrames);
+    var beforeShape = new Float32Array(nBands), afterShape = new Float32Array(nBands);
+    for (var i2 = 0; i2 < numFrames; i2++){
+      var w = Math.min(winFramesMax, i2, numFrames - 1 - i2);
+      if (w < winFramesMin){ continue; }
+      // se usa la MEDIANA (no el promedio) del volumen de la ventana para
+      // decidir si un lado está "en silencio": un solo golpe de batería
+      // fuerte en medio de un tramo silencioso alcanza para inflar el
+      // PROMEDIO por encima del piso de silencio (así fallaba antes,
+      // justo en el golpe del segundo 1 de "Oye mi amor"); la mediana no
+      // se deja arrastrar por uno o dos golpes sueltos.
+      var beforeE = medianOf(energies, i2-w, i2);
+      var afterE = medianOf(energies, i2, i2+w);
+      if (Math.min(beforeE, afterE) < silenceFloor){ continue; }
+      meanShapeInto(shapes, i2-w, i2, nBands, beforeShape);
+      meanShapeInto(shapes, i2, i2+w, nBands, afterShape);
+      var dist = 0;
+      for (var b=0;b<nBands;b++) dist += Math.abs(afterShape[b]-beforeShape[b]);
+      novelty[i2] = dist;
+    }
+    // umbral en la escala de esta nueva métrica (distancia entre dos
+    // "formas" espectrales que suman 1 cada una, va de 0 a 2) — validado
+    // contra audio real, no un valor de fábrica sin probar.
+    var noveltyThreshold = 0.15;
+    var idealGapSec = totalDur / (numBoundaries + 1);
+    var minGapSec = Math.min(6, idealGapSec * 0.6);
+    var minGapFrames = Math.max(1, Math.round(minGapSec * sr / hop));
+    var order = [];
+    for (var i3 = winFramesMin; i3 < numFrames - winFramesMin; i3++) order.push(i3);
+    if (!order.length){ for (var i3b = 0; i3b < numFrames; i3b++) order.push(i3b); }
+    order.sort(function(a, b){ return novelty[b] - novelty[a]; });
+    var chosen = [];
+    for (var oi = 0; oi < order.length && chosen.length < numBoundaries; oi++){
+      var idx = order[oi];
+      if (novelty[idx] < noveltyThreshold) break;
+      var tooClose = chosen.some(function(c){ return Math.abs(c - idx) < minGapFrames; });
+      if (!tooClose) chosen.push(idx);
+    }
+    chosen.sort(function(a, b){ return a - b; });
+    while (chosen.length < numBoundaries){
+      var bounds = [0].concat(chosen).concat([numFrames - 1]);
+      var biggestGap = -1, biggestGapAt = -1;
+      for (var gi = 0; gi < bounds.length - 1; gi++){
+        var gap = bounds[gi + 1] - bounds[gi];
+        if (gap > biggestGap){ biggestGap = gap; biggestGapAt = gi; }
+      }
+      var fillIdx = Math.round((bounds[biggestGapAt] + bounds[biggestGapAt + 1]) / 2);
+      chosen.push(fillIdx);
+      chosen.sort(function(a, b){ return a - b; });
+    }
+    return chosen.map(function(idx){ return idx * hop / sr; });
+  }
+
+  var detectProposal = [];
+  function renderDetectPanel(){
+    el.detectList.innerHTML = '';
+    detectProposal.forEach(function(item, i){
+      var row = document.createElement('div');
+      row.className = 'detect-row';
+      var labelEl = document.createElement('span');
+      labelEl.className = 'detect-label';
+      labelEl.textContent = item.label;
+      var secsEl = document.createElement('span');
+      secsEl.className = 'detect-secs';
+      secsEl.id = 'detectSecs' + i;
+      secsEl.textContent = item.durationSec.toFixed(1) + 's';
+      function stepBtn(delta, label){
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ghost btn small';
+        b.textContent = label;
+        b.addEventListener('click', function(){
+          detectProposal[i].durationSec = Math.max(0.3, detectProposal[i].durationSec + delta);
+          secsEl.textContent = detectProposal[i].durationSec.toFixed(1) + 's';
+        });
+        return b;
+      }
+      row.appendChild(labelEl);
+      row.appendChild(stepBtn(-5, '−5s'));
+      row.appendChild(stepBtn(-1, '−1s'));
+      row.appendChild(secsEl);
+      row.appendChild(stepBtn(1, '+1s'));
+      row.appendChild(stepBtn(5, '+5s'));
+      el.detectList.appendChild(row);
+    });
+  }
+  function closeDetectPanel(){
+    detectProposal = [];
+    el.detectPanel.classList.remove('show');
+  }
+  el.detectSectionsBtn.addEventListener('click', function(){
+    var s = currentSong();
+    if (!s || s.sections.length < 2){
+      window.alert('Esta canción necesita al menos 2 secciones para poder proponer tiempos.');
+      return;
+    }
+    closeSettings();
+    el.detectAudioInput.value = '';
+    el.detectAudioInput.click();
+  });
+  el.detectAudioInput.addEventListener('change', function(){
+    var file = el.detectAudioInput.files && el.detectAudioInput.files[0];
+    if (!file) return;
+    var s = currentSong();
+    el.detectSectionsBtn.disabled = true;
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        if (!bpmAudioCtx) bpmAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        bpmAudioCtx.decodeAudioData(reader.result.slice(0), function(audioBuffer){
+          // el análisis ahora mira también el contenido de frecuencias
+          // (no solo el volumen), así que puede tardar varios segundos en
+          // canciones largas — se avisa y se le da un respiro al navegador
+          // para pintar el texto antes de arrancar el cálculo pesado.
+          var originalBtnText = el.detectSectionsBtn.textContent;
+          el.detectSectionsBtn.textContent = 'Analizando…';
+          setTimeout(function(){
+            var numBoundaries, boundaries;
+            try {
+              numBoundaries = s.sections.length - 1;
+              boundaries = detectSectionBoundaries(audioBuffer, numBoundaries);
+            } catch (eDetect){
+              el.detectSectionsBtn.disabled = false;
+              el.detectSectionsBtn.textContent = originalBtnText;
+              window.alert('No se pudo analizar este audio.');
+              return;
+            }
+            el.detectSectionsBtn.disabled = false;
+            el.detectSectionsBtn.textContent = originalBtnText;
+            var totalDur = audioBuffer.duration;
+            var edges = [0].concat(boundaries).concat([totalDur]);
+            detectProposal = s.sections.map(function(sec, i){
+              var from = edges[i] !== undefined ? edges[i] : totalDur;
+              var to = edges[i + 1] !== undefined ? edges[i + 1] : totalDur;
+              return { label: sec.label, durationSec: Math.max(0.3, to - from) };
+            });
+            // de paso, guardamos el audio como referencia para poder
+            // escucharlo después con 🎧 y verificar los tiempos a oído
+            saveSongAudioBlob(s.id, file).catch(function(){ /* si no se pudo guardar, no es crítico */ });
+            renderDetectPanel();
+            el.detectPanel.classList.add('show');
+          }, 30);
+        }, function(){
+          el.detectSectionsBtn.disabled = false;
+          window.alert('No se pudo leer ese archivo de audio. Probá con un MP3 o WAV.');
+        });
+      } catch (e){
+        el.detectSectionsBtn.disabled = false;
+        window.alert('Este navegador no puede analizar audio acá.');
+      }
+    };
+    reader.onerror = function(){ el.detectSectionsBtn.disabled = false; };
+    reader.readAsArrayBuffer(file);
+  });
+  el.detectConfirmBtn.addEventListener('click', function(){
+    var s = currentSong();
+    detectProposal.forEach(function(item, i){
+      if (s.sections[i]) s.sections[i].durationSec = item.durationSec;
+    });
+    persist();
+    closeDetectPanel();
+    updateSpeedReadout();
+    window.alert('Tiempos actualizados a partir del análisis. Podés afinar cualquiera con 🎯 si hace falta.');
+  });
+  el.detectCancelBtn.addEventListener('click', closeDetectPanel);
+
+  // ---------- 🎧 panel de referencia de audio ----------
+  var refAudioObjectUrl = null;
+  function revokeRefAudioUrl(){
+    if (refAudioObjectUrl){ URL.revokeObjectURL(refAudioObjectUrl); refAudioObjectUrl = null; }
+  }
+  // calcula desde dónde arranca cada sección en segundos, sumando las
+  // duraciones calibradas — si alguna sección todavía no tiene tiempo
+  // calibrado, el salto de esa en adelante queda deshabilitado (no hay
+  // forma de saber a qué segundo real corresponde)
+  function sectionStartOffsets(s){
+    var offsets = [];
+    var acc = 0;
+    var allCalibrated = true;
+    s.sections.forEach(function(sec){
+      offsets.push(allCalibrated ? acc : null);
+      if (typeof sec.durationSec === 'number' && sec.durationSec > 0){
+        acc += sec.durationSec;
+      } else {
+        allCalibrated = false;
+      }
+    });
+    return offsets;
+  }
+  function renderRefAudioList(s){
+    el.refAudioList.innerHTML = '';
+    var offsets = sectionStartOffsets(s);
+    s.sections.forEach(function(sec, i){
+      var row = document.createElement('div');
+      row.className = 'detect-row';
+      var labelEl = document.createElement('span');
+      labelEl.className = 'detect-label';
+      labelEl.textContent = sec.label;
+      row.appendChild(labelEl);
+      var jumpBtn = document.createElement('button');
+      jumpBtn.type = 'button';
+      jumpBtn.className = 'ghost btn small';
+      if (offsets[i] === null){
+        jumpBtn.textContent = 'sin calibrar';
+        jumpBtn.disabled = true;
+      } else {
+        jumpBtn.textContent = '▶ desde acá';
+        jumpBtn.addEventListener('click', function(){
+          el.refAudioEl.currentTime = offsets[i];
+          el.refAudioEl.play().catch(function(){ /* el navegador puede pedir que el usuario interactúe primero: se ignora */ });
+        });
+      }
+      row.appendChild(jumpBtn);
+      el.refAudioList.appendChild(row);
+    });
+  }
+  function openRefAudioPanel(){
+    var s = currentSong();
+    if (!s) return;
+    closeSettings();
+    el.refAudioSongTitle.textContent = s.title;
+    el.refAudioEmpty.classList.remove('show');
+    el.refAudioLoaded.classList.remove('show');
+    el.refAudioPanel.classList.add('show');
+    getSongAudioBlob(s.id).then(function(blob){
+      if (currentSong() !== s) return; // el usuario cambió de canción mientras cargaba
+      if (!blob){
+        el.refAudioEmpty.classList.add('show');
+        return;
+      }
+      revokeRefAudioUrl();
+      refAudioObjectUrl = URL.createObjectURL(blob);
+      el.refAudioEl.src = refAudioObjectUrl;
+      renderRefAudioList(s);
+      el.refAudioLoaded.classList.add('show');
+    }).catch(function(){
+      el.refAudioEmpty.classList.add('show');
+    });
+  }
+  function closeRefAudioPanel(){
+    el.refAudioEl.pause();
+    el.refAudioEl.removeAttribute('src');
+    el.refAudioEl.load();
+    revokeRefAudioUrl();
+    el.refAudioPanel.classList.remove('show');
+  }
+  function attachRefAudioFile(file){
+    var s = currentSong();
+    if (!s || !file) return;
+    saveSongAudioBlob(s.id, file).then(function(){
+      openRefAudioPanel();
+    }).catch(function(){
+      window.alert('No se pudo guardar el audio. Puede que no haya espacio disponible en este dispositivo.');
+    });
+  }
+  el.refAudioBtn.addEventListener('click', openRefAudioPanel);
+  el.refAudioCloseBtn.addEventListener('click', closeRefAudioPanel);
+  el.refAudioAttachBtn.addEventListener('click', function(){
+    el.refAudioAttachInput.value = '';
+    el.refAudioAttachInput.click();
+  });
+  el.refAudioReplaceBtn.addEventListener('click', function(){
+    el.refAudioAttachInput.value = '';
+    el.refAudioAttachInput.click();
+  });
+  el.refAudioAttachInput.addEventListener('change', function(){
+    var file = el.refAudioAttachInput.files && el.refAudioAttachInput.files[0];
+    if (file) attachRefAudioFile(file);
+  });
+  el.refAudioRemoveBtn.addEventListener('click', function(){
+    var s = currentSong();
+    if (!s) return;
+    if (!window.confirm('¿Quitar el audio de referencia de "' + s.title + '"?')) return;
+    deleteSongAudioBlob(s.id).then(function(){
+      el.refAudioEl.pause();
+      el.refAudioEl.removeAttribute('src');
+      el.refAudioEl.load();
+      revokeRefAudioUrl();
+      el.refAudioLoaded.classList.remove('show');
+      el.refAudioEmpty.classList.add('show');
+    });
+  });
+
+  el.editorSave.addEventListener('click', function(){
+    var title = el.editTitle.value.trim() || "Sin título";
+    var key = el.editKey.value.trim() || "C";
+    var bpmVal = parseInt(el.editBpm.value, 10);
+    var bpm = (!isNaN(bpmVal) && bpmVal >= 30 && bpmVal <= 260) ? bpmVal : state.bpm;
+    var meta = el.editMeta.value.trim() || "Canción propia";
+    var sections = parseSongText(el.editBody.value);
+    if (!sections.length) sections = [{ label: "Verso 1", lines: ["[" + key + "]Escribe tu letra aquí"] }];
+    var song = { title: title, key: key, bpm: bpm, meta: meta, sections: sections };
+    if (state.editingIndex === -1){
+      song.id = genSongId();
+      songs.push(song);
+      state.songIndex = songs.length - 1;
+    } else {
+      song.id = songs[state.editingIndex].id || genSongId();
+      songs[state.editingIndex] = song;
+      state.songIndex = state.editingIndex;
+    }
+    state.semis = 0;
+    applySongBpm(song);
+    closeEditor();
+    renderAll();
+    broadcastFull();
+    persist();
+  });
+
+  el.editorDelete.addEventListener('click', function(){
+    if (state.editingIndex === -1 || songs.length <= 1) return;
+    var removedId = songs[state.editingIndex].id;
+    songs.splice(state.editingIndex, 1);
+    if (removedId) deleteSongAudioBlob(removedId).catch(function(){ /* no crítico */ });
+    if (state.songIndex >= songs.length) state.songIndex = songs.length - 1;
+    closeEditor();
+    renderAll();
+    broadcastFull();
+    persist();
+  });
+
+  function renderHeader(){
+    var s = currentSong();
+    el.songTitle.textContent = s.title;
+    el.songMeta.textContent = s.meta;
+    el.keyLabel.textContent = transposeChord(s.key, state.semis);
+  }
+
+  function renderLyrics(){
+    var s = currentSong();
+    el.lyrics.innerHTML = "";
+    s.sections.forEach(function(sec){
+      var label = document.createElement('div');
+      label.className = 'section-label';
+      label.textContent = sec.label;
+      el.lyrics.appendChild(label);
+
+      var linesAdded = 0;
+      sec.lines.forEach(function(lineStr){
+        var trimmed = lineStr.trim();
+        if (trimmed.charAt(0) === '!'){
+          var cue = document.createElement('div');
+          cue.className = 'cue-block';
+          cue.textContent = trimmed.slice(1).trim();
+          el.lyrics.appendChild(cue);
+          return;
+        }
+        var lineEl = document.createElement('div');
+        lineEl.className = 'line';
+        var groups = parseLine(lineStr);
+        groups.forEach(function(g){
+          var grp = document.createElement('div');
+          grp.className = 'grp';
+          var chordEl = document.createElement('div');
+          chordEl.className = 'chord-tag';
+          chordEl.textContent = g.chord ? transposeChord(g.chord, state.semis) : '';
+          var lyricEl = document.createElement('div');
+          lyricEl.className = 'lyric-tag';
+          lyricEl.textContent = g.text;
+          grp.appendChild(chordEl);
+          grp.appendChild(lyricEl);
+          lineEl.appendChild(grp);
+        });
+        el.lyrics.appendChild(lineEl);
+        linesAdded++;
+      });
+      if (!linesAdded){
+        var placeholder = document.createElement('div');
+        placeholder.className = 'line line-placeholder';
+        var pGrp = document.createElement('div');
+        pGrp.className = 'grp';
+        var pLyric = document.createElement('div');
+        pLyric.className = 'lyric-tag';
+        pLyric.textContent = '♪ (' + sec.label.toLowerCase() + ' instrumental)';
+        pGrp.appendChild(document.createElement('div')).className = 'chord-tag';
+        pGrp.appendChild(pLyric);
+        placeholder.appendChild(pGrp);
+        el.lyrics.appendChild(placeholder);
+      }
+    });
+    setupCueObserver();
+    computeSectionOffsets();
+    computeLineOffsets();
+    updatePositionBadge();
+    updateActiveLine();
+    updateSpeedReadout();
+  }
+
+  // ---------- resalta la línea de letra/acorde que está pasando por la
+  // línea de referencia fija, para saber de un vistazo "dónde vamos" ----------
+  var lineOffsets = [];
+  var lastActiveLineEl = null;
+  function computeLineOffsets(){
+    lineOffsets = [];
+    lastActiveLineEl = null;
+    var sectionIdx = -1;
+    el.lyrics.querySelectorAll('.section-label, .line').forEach(function(node){
+      if (node.classList.contains('section-label')){ sectionIdx++; return; }
+      lineOffsets.push({ el: node, top: node.offsetTop, sectionIdx: sectionIdx });
+    });
+  }
+  function updateActiveLine(){
+    if (!lineOffsets.length) return;
+    // 38% de la altura visible, igual que la posición de la línea de
+    // referencia fija (.reading-line) definida en el CSS
+    var readingY = el.lyrics.scrollTop + el.lyrics.clientHeight * 0.38;
+    var curSectionIdx = currentSectionIndex();
+    var current = null, firstInSection = null;
+    for (var i = 0; i < lineOffsets.length; i++){
+      var lo = lineOffsets[i];
+      // nunca resalta una línea de una sección posterior a la que el
+      // sistema de bloques marca como actual: en una intro corta, la línea
+      // de referencia (38% de la pantalla) ya "alcanza" numéricamente al
+      // verso desde el arranque aunque el bloque siga clavado en la intro —
+      // esto evita que el resaltado se adelante a una sección que todavía
+      // no empezó de verdad.
+      if (lo.sectionIdx > curSectionIdx) break;
+      if (lo.sectionIdx === curSectionIdx && firstInSection === null) firstInSection = lo.el;
+      if (lo.top <= readingY) current = lo.el;
+    }
+    if (!current) current = firstInSection || lineOffsets[0].el;
+    if (current !== lastActiveLineEl){
+      if (lastActiveLineEl) lastActiveLineEl.classList.remove('line-active');
+      current.classList.add('line-active');
+      lastActiveLineEl = current;
+    }
+  }
+
+  var sectionOffsets = [];
+  function computeSectionOffsets(){
+    sectionOffsets = [];
+    el.lyrics.querySelectorAll('.section-label').forEach(function(node){
+      sectionOffsets.push({ label: node.textContent, top: node.offsetTop });
+    });
+  }
+  function currentSectionIndex(){
+    if (!sectionOffsets.length) return -1;
+    var top = el.lyrics.scrollTop;
+    var idx = 0;
+    for (var i = 0; i < sectionOffsets.length; i++){
+      if (sectionOffsets[i].top <= top + 70) idx = i;
+      else break;
+    }
+    return idx;
+  }
+  function updatePositionBadge(){
+    if (!sectionOffsets.length){ el.positionBadge.textContent = ''; return; }
+    var current = sectionOffsets[currentSectionIndex()].label;
+    el.positionBadge.textContent = current;
+    maybeAnnounceSection(current);
+  }
+
+  // ---------- calibrar tiempos reales por sección ----------
+  // el scroll sincronizado normal avanza a velocidad constante (calibración ×
+  // BPM), lo cual se desfasa en canciones con partes irregulares (una intro
+  // larga sin letra, un puente con notas sostenidas, etc). Esto permite tocar
+  // "siguiente" mientras escuchás la canción real, y guarda cuántos segundos
+  // duró cada sección — el scroll después usa esa duración exacta para esa
+  // sección en vez del promedio global.
+  var calibState = null; // { index, startTs, sections }
+  function startCalibration(){
+    var s = currentSong();
+    if (!s || !s.sections.length) return;
+    var listo = window.confirm(
+      'Poné a sonar la canción real ahora (altavoz, video, tu banda tocando).\n\n' +
+      'Apenas toques "Aceptar", arranca el cronómetro en "' + s.sections[0].label + '".\n' +
+      'Cuando escuches que empieza la parte siguiente, tocá "Siguiente sección" en la pantalla.\n\n' +
+      '¿Está sonando la canción ya?'
+    );
+    if (!listo) return;
+    calibState = { index: 0, startTs: performance.now() };
+    el.calibBanner.classList.add('show');
+    updateCalibLabel();
+  }
+  function updateCalibLabel(){
+    var s = currentSong();
+    var sec = s.sections[calibState.index];
+    var isLast = calibState.index === s.sections.length - 1;
+    el.calibCurrentLabel.textContent = sec.label;
+    el.calibNextBtn.textContent = isLast ? 'Finalizar (fin de la canción)' : 'Siguiente sección ▶';
+  }
+  function calibTapNext(){
+    if (!calibState) return;
+    var s = currentSong();
+    var elapsed = (performance.now() - calibState.startTs) / 1000;
+    s.sections[calibState.index].durationSec = Math.max(0.3, elapsed);
+    var isLast = calibState.index === s.sections.length - 1;
+    if (isLast){
+      persist();
+      el.calibBanner.classList.remove('show');
+      var resumen = s.sections.map(function(sec){
+        return sec.label + ': ' + (sec.durationSec ? sec.durationSec.toFixed(1) + 's' : '—');
+      }).join('\n');
+      calibState = null;
+      window.alert('Tiempos guardados:\n' + resumen);
+      updateSpeedReadout();
+      return;
+    }
+    calibState.index++;
+    calibState.startTs = performance.now();
+    updateCalibLabel();
+  }
+  function cancelCalibration(){
+    calibState = null;
+    el.calibBanner.classList.remove('show');
+  }
+  el.calibTimesBtn.addEventListener('click', function(){
+    if (calibState){ cancelCalibration(); return; }
+    closeSettings();
+    startCalibration();
+  });
+  el.calibNextBtn.addEventListener('click', calibTapNext);
+  el.calibCancelBtn.addEventListener('click', cancelCalibration);
+
+  var cueObserver = null;
+  function setupCueObserver(){
+    if (cueObserver) cueObserver.disconnect();
+    cueObserver = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        var wasActive = entry.target.classList.contains('cue-active');
+        entry.target.classList.toggle('cue-active', entry.isIntersecting);
+        if (entry.isIntersecting && !wasActive && state.scrolling){
+          speak(entry.target.textContent);
+        }
+      });
+    }, { root: el.lyrics, rootMargin: '-28% 0px -60% 0px', threshold: 0 });
+    el.lyrics.querySelectorAll('.cue-block').forEach(function(node){ cueObserver.observe(node); });
+  }
+
+  // se agrupan en un solo listener "pasivo" (no bloquea al navegador) y
+  // limitado a una vez por cuadro, para que el trabajo de resaltar la
+  // línea activa nunca compita con el toque de un botón (esto es lo que
+  // hacía sentir "trabado" el botón de pausa mientras corría el scroll)
+  var lyricsScrollScheduled = false;
+  function onLyricsScroll(){
+    if (lyricsScrollScheduled) return;
+    lyricsScrollScheduled = true;
+    requestAnimationFrame(function(){
+      lyricsScrollScheduled = false;
+      updatePositionBadge();
+      updateActiveLine();
+    });
+  }
+  el.lyrics.addEventListener('scroll', onLyricsScroll, { passive: true });
+
+  function renderAll(){
+    renderPicker();
+    renderHeader();
+    renderLyrics();
+    renderDrawer();
+    updateNav();
+  }
+
+  document.documentElement.style.setProperty('--lyric-size', state.fontSize + 'px');
+
+  el.keyUp.addEventListener('click', function(){ state.semis++; renderHeader(); renderLyrics(); broadcastPatch({semis: state.semis}); });
+  el.keyDown.addEventListener('click', function(){ state.semis--; renderHeader(); renderLyrics(); broadcastPatch({semis: state.semis}); });
+
+  el.fontUp.addEventListener('click', function(){
+    state.fontSize = Math.min(state.fontSize + 2, 44);
+    document.documentElement.style.setProperty('--lyric-size', state.fontSize + 'px');
+    computeLineOffsets();
+    updateSpeedReadout();
+    persist();
+  });
+  el.fontDown.addEventListener('click', function(){
+    state.fontSize = Math.max(state.fontSize - 2, 16);
+    document.documentElement.style.setProperty('--lyric-size', state.fontSize + 'px');
+    computeLineOffsets();
+    updateSpeedReadout();
+    persist();
+  });
+
+  // ---------- wake lock: evita que la pantalla se apague sola en escena ----------
+  var wakeLock = null;
+  var wakeLockSupported = ('wakeLock' in navigator);
+  function requestWakeLock(){
+    if (!wakeLockSupported) return;
+    navigator.wakeLock.request('screen').then(function(lock){
+      wakeLock = lock;
+      wakeLock.addEventListener('release', function(){ wakeLock = null; });
+    }).catch(function(){ /* puede fallar por batería baja o permisos: se ignora en silencio */ });
+  }
+  function releaseWakeLock(){
+    if (wakeLock){ wakeLock.release().catch(function(){}); wakeLock = null; }
+  }
+  // el navegador libera el wake lock automáticamente si la pestaña deja de ser visible;
+  // si seguimos en modo scroll al volver a primer plano, hay que volver a pedirlo.
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible' && state.scrolling) requestWakeLock();
+  });
+
+  // ---------- auto-scroll ----------
+  var scrollRaf = null;
+  var lastTs = null;
+  // contador monotónico: permite al Seguidor descartar una posición vieja que
+  // llegue tarde o fuera de orden por el canal "rápido" (ver más abajo), en vez
+  // de aplicarla y producir un salto hacia atrás.
+  var scrollSeq = 0;
+  function sendScrollTop(top){
+    if (state.role !== 'director' || !state.connected) return;
+    scrollSeq++;
+    var payload = { type: 'scroll', top: top, seq: scrollSeq };
+    // se manda por el canal de control (confiable/ordenado, por si el de scroll
+    // todavía no terminó de abrir) y por el canal de scroll (no-ordenado: un
+    // paquete perdido/retrasado ya no bloquea a los que vienen después). El
+    // seq en el receptor evita aplicar una posición vieja dos veces o fuera de orden.
+    state.conns.forEach(function(c){ if (c.open) c.send(payload); });
+    state.scrollConns.forEach(function(c){ if (c.open) c.send(payload); });
+  }
+  // ---------- avance del scroll: por bloques si hay tiempo marcado ----------
+  // antes, una sección con tiempo marcado avanzaba de a poco a lo largo de
+  // todo ese tiempo (velocidad constante calculada de altura/duración). Ahora
+  // se queda quieta mostrando el bloque completo hasta que se cumple el
+  // tiempo real, y ahí salta directo al siguiente bloque — así una intro sin
+  // letra no "gastea" scroll de a poquito, se mantiene fija hasta que termina
+  // de verdad y recién ahí pasa al verso. Las secciones SIN tiempo marcado
+  // siguen avanzando continuo, a la velocidad global por BPM, como siempre.
+  //
+  // "en qué sección estoy" se guarda como estado explícito (blockSectionIndex)
+  // en vez de recalcularlo cada cuadro mirando dónde quedó el scroll — una
+  // sección de bloque (ej. una intro) puede tener muy poco contenido visual
+  // (una sola línea de acordes) para una duración real larga, así que basarse
+  // en la altura scrolleada para "adivinar" la sección da resultados falsos.
+  var blockSectionIndex = 0;
+  var blockElapsedSec = 0;
+  var blockInitialized = false;
+  function resetBlockState(){
+    blockSectionIndex = 0;
+    blockElapsedSec = 0;
+    blockInitialized = false;
+  }
+  // alinea el inicio de una sección con la línea de lectura fija (38% de
+  // altura) en vez de con el borde superior de la pantalla — si no, un
+  // bloque con poco contenido (como una intro de una sola línea) queda
+  // pegado arriba, en la zona oscurecida, y parece que no aparece nada.
+  function scrollTopForSectionStart(docTop){
+    return Math.max(0, docTop - el.lyrics.clientHeight * 0.38);
+  }
+  function snapToSection(idx){
+    if (sectionOffsets[idx]) el.lyrics.scrollTop = scrollTopForSectionStart(sectionOffsets[idx].top);
+  }
+  function advanceScrollTop(dt){
+    if (!state.syncBpm){
+      el.lyrics.scrollTop += state.speed * 14 * dt;
+      return;
+    }
+    var s = currentSong();
+    if (!s || !s.sections || sectionOffsets.length !== s.sections.length){
+      el.lyrics.scrollTop += state.pxPerBeat * (state.bpm / 60) * dt;
+      return;
+    }
+    if (blockSectionIndex >= s.sections.length) blockSectionIndex = s.sections.length - 1;
+    var sec = s.sections[blockSectionIndex];
+    if (!blockInitialized){
+      blockInitialized = true;
+      if (sec && sec.durationSec > 0) snapToSection(blockSectionIndex);
+    }
+    if (sec && sec.durationSec > 0){
+      blockElapsedSec += dt;
+      if (blockElapsedSec >= sec.durationSec && blockSectionIndex < s.sections.length - 1){
+        blockSectionIndex++;
+        blockElapsedSec = 0;
+        var nextSec = s.sections[blockSectionIndex];
+        if (nextSec && nextSec.durationSec > 0) snapToSection(blockSectionIndex);
+      }
+      // mientras no se cumpla el tiempo del bloque, el scroll no se mueve
+    } else {
+      el.lyrics.scrollTop += state.pxPerBeat * (state.bpm / 60) * dt;
+      // si el scroll continuo alcanza el inicio de la siguiente sección
+      // calibrada, pasa a controlarla por bloque desde acá
+      if (blockSectionIndex + 1 < sectionOffsets.length){
+        var readingY = el.lyrics.scrollTop + el.lyrics.clientHeight * 0.38;
+        if (readingY >= sectionOffsets[blockSectionIndex + 1].top){
+          blockSectionIndex++;
+          blockElapsedSec = 0;
+          var enteredSec = s.sections[blockSectionIndex];
+          if (enteredSec && enteredSec.durationSec > 0) snapToSection(blockSectionIndex);
+        }
+      }
+    }
+  }
+  function currentPxPerSec(){
+    return currentPxPerSecAt(el.lyrics.scrollTop);
+  }
+  // esto ya NO controla el avance real (ver advanceScrollTop) — queda solo
+  // para el indicador "≈ X.Xs por línea", como una velocidad promedio de
+  // referencia útil para calibrar, aunque el movimiento real de una sección
+  // con tiempo marcado ahora sea "quieto y después salta" en vez de parejo.
+  // Usa blockSectionIndex (el mismo estado que gobierna el avance real) en
+  // vez de adivinar la sección por altura de scroll, para que el número
+  // mostrado coincida siempre con lo que realmente está pasando.
+  function currentPxPerSecAt(top){
+    if (state.syncBpm){
+      var s = currentSong();
+      if (s && s.sections && sectionOffsets.length === s.sections.length && s.sections[blockSectionIndex]){
+        var i = blockSectionIndex;
+        var start = sectionOffsets[i].top;
+        var end = (i + 1 < sectionOffsets.length) ? sectionOffsets[i + 1].top : el.lyrics.scrollHeight;
+        var sec = s.sections[i];
+        if (sec && sec.durationSec > 0){
+          var heightPx = Math.max(1, end - start);
+          return heightPx / sec.durationSec;
+        }
+      }
+      return state.pxPerBeat * (state.bpm / 60);
+    }
+    return state.speed * 14;
+  }
+  // altura real (en píxeles) de una línea de letra típica en la canción actual,
+  // medida directamente del render — así el indicador de calibración es exacto
+  // sin importar el tamaño de letra elegido o cuántos acordes tenga cada línea.
+  function avgLineHeightPx(){
+    if (lineOffsets.length < 2) return 78;
+    var total = 0;
+    for (var i = 1; i < lineOffsets.length; i++) total += (lineOffsets[i].top - lineOffsets[i - 1].top);
+    return total / (lineOffsets.length - 1);
+  }
+  // muestra en vivo cuántos segundos tardaría en pasar una línea completa con
+  // la velocidad actual, para calibrar viendo un número real en vez de a ciegas.
+  function updateSpeedReadout(){
+    if (!el.speedReadout) return;
+    var pxSec = currentPxPerSec();
+    if (pxSec <= 0){ el.speedReadout.textContent = ''; return; }
+    var secPerLine = avgLineHeightPx() / pxSec;
+    el.speedReadout.textContent = '≈ ' + secPerLine.toFixed(1) + 's por línea';
+  }
+  var lastBroadcastTs = 0;
+  function scrollStep(ts){
+    if (!lastTs) lastTs = ts;
+    var dt = (ts - lastTs) / 1000;
+    lastTs = ts;
+    advanceScrollTop(dt);
+    if (state.role === 'director' && state.connected && ts - lastBroadcastTs > 100){
+      lastBroadcastTs = ts;
+      sendScrollTop(el.lyrics.scrollTop);
+    }
+    if (state.scrolling) scrollRaf = requestAnimationFrame(scrollStep);
+  }
+  function beginScrolling(){
+    state.scrolling = true;
+    el.scrollToggle.classList.add('playing');
+    el.scrollToggle.textContent = '⏸';
+    el.scrollToggle.disabled = false;
+    lastTs = null;
+    requestWakeLock();
+    scrollRaf = requestAnimationFrame(scrollStep);
+    if (state.syncBpm && !state.metroOn){
+      state.metroOn = true;
+      el.metroToggle.classList.add('on');
+      startMetro();
+    }
+    broadcastPatch({ scrolling: true, metroOn: state.metroOn });
+  }
+  el.scrollToggle.addEventListener('click', function(){
+    requestWakeLock();
+    if (state.scrolling){
+      state.scrolling = false;
+      el.scrollToggle.classList.remove('playing');
+      el.scrollToggle.textContent = '▶';
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      releaseWakeLock();
+      broadcastPatch({ scrolling: false });
+      return;
+    }
+    if (state.counting){
+      if (countInAbort) countInAbort(); // segundo toque durante el conteo: arranca ya
+      return;
+    }
+    // si ya estábamos a mitad de la canción (pausa momentánea), reanuda
+    // de inmediato sin volver a contar — el conteo es solo para el arranque
+    if (el.lyrics.scrollTop > 4){
+      beginScrolling();
+      return;
+    }
+    broadcastPatch({ counting: true, bpm: state.bpm });
+    playCountIn(4, beginScrolling);
+  });
+  el.restartBtn.addEventListener('click', function(){
+    if (state.scrolling && !window.confirm('La canción está sonando. ¿Reiniciar al inicio del tema?')) return;
+    state.scrolling = false;
+    el.scrollToggle.classList.remove('playing');
+    el.scrollToggle.textContent = '▶';
+    if (scrollRaf) cancelAnimationFrame(scrollRaf);
+    releaseWakeLock();
+    stopLocalFallback();
+    el.lyrics.scrollTop = 0;
+    resetBlockState();
+    lastAnnouncedSection = null;
+    broadcastPatch({ scrolling: false });
+    if (state.role === 'director' && state.connected){
+      sendScrollTop(0);
+    }
+  });
+  el.speedSlider.addEventListener('input', function(){
+    if (state.syncBpm){
+      state.pxPerBeat = parseInt(this.value, 10) * 8;
+      el.speedVal.textContent = this.value;
+      var activeSong = songs[state.songIndex];
+      if (activeSong){ activeSong.pxPerBeat = state.pxPerBeat; persist(); }
+    } else {
+      state.speed = parseInt(this.value, 10);
+      el.speedVal.textContent = state.speed;
+    }
+    updateSpeedReadout();
+  });
+  // refleja en el botón/etiqueta/slider el valor actual de syncBpm — se usa
+  // tanto al tocar el botón como al restaurar el valor guardado al arrancar
+  // la app (antes syncBpm no se persistía y siempre arrancaba en "off",
+  // aunque el usuario lo hubiera activado antes: por eso el scroll por
+  // bloques con tiempos calibrados parecía no respetarse nunca en un show).
+  function setSyncBpmUI(){
+    el.syncToggle.classList.toggle('on', state.syncBpm);
+    if (state.syncBpm){
+      el.speedLabel.textContent = 'Distancia por negra (BPM ' + state.bpm + ')';
+      el.speedSlider.value = Math.round(state.pxPerBeat / 8);
+      el.speedVal.textContent = el.speedSlider.value;
+    } else {
+      el.speedLabel.textContent = 'Velocidad de scroll';
+      el.speedSlider.value = state.speed;
+      el.speedVal.textContent = state.speed;
+    }
+    updateSpeedReadout();
+  }
+  el.syncToggle.addEventListener('click', function(){
+    state.syncBpm = !state.syncBpm;
+    setSyncBpmUI();
+    if (state.syncBpm && state.scrolling && !state.metroOn){
+      state.metroOn = true;
+      el.metroToggle.classList.add('on');
+      startMetro();
+    }
+    persist();
+  });
+
+  // ---------- metronome ----------
+  var audioCtx = null;
+  var metroTimer = null;
+  function ensureAudio(){
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  function click(){
+    ensureAudio();
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.frequency.value = 1000;
+    gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.05);
+    pulseBeat();
+  }
+  function pulseBeat(){
+    el.beatFlash.classList.add('on');
+    setTimeout(function(){ el.beatFlash.classList.remove('on'); }, 90);
+  }
+  function startMetro(){
+    stopMetro();
+    var interval = 60000 / state.bpm;
+    click();
+    metroTimer = setInterval(click, interval);
+  }
+  function stopMetro(){
+    if (metroTimer) clearInterval(metroTimer);
+    metroTimer = null;
+  }
+  el.metroToggle.addEventListener('click', function(){
+    state.metroOn = !state.metroOn;
+    el.metroToggle.classList.toggle('on', state.metroOn);
+    if (state.metroOn) startMetro(); else stopMetro();
+    broadcastPatch({ metroOn: state.metroOn });
+  });
+
+  // ---------- voz guía (TTS) ----------
+  // Punto de extensión para el futuro: si algún día se agregan clips de audio
+  // propios por palabra/cue, este es el lugar para revisar primero un clip
+  // subido (por texto o id) y solo si no existe, caer a voz sintética.
+  var ttsSupported = ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined');
+  function speak(text){
+    if (!state.voiceGuideOn || !ttsSupported) return;
+    try {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = 'es-MX';
+      u.rate = 1;
+      window.speechSynthesis.speak(u);
+    } catch(e){ /* si TTS falla en este navegador, simplemente se omite */ }
+  }
+  function setVoiceGuideUI(){
+    el.voiceToggle.classList.toggle('on', state.voiceGuideOn);
+  }
+  el.voiceToggle.addEventListener('click', function(){
+    state.voiceGuideOn = !state.voiceGuideOn;
+    setVoiceGuideUI();
+    if (!state.voiceGuideOn && ttsSupported) window.speechSynthesis.cancel();
+    persist();
+  });
+
+  var COUNT_WORDS = ['Uno','Dos','Tres','Cuatro'];
+  var skipCountIn = false;
+  function showCountVisual(n){
+    el.countOverlay.textContent = n;
+    el.countOverlay.classList.add('show');
+    el.scrollToggle.textContent = n;
+  }
+  function hideCountVisual(){
+    el.countOverlay.classList.remove('show');
+  }
+
+  // ---------- señales en vivo entre músicos (solo, corte, final...) ----------
+  var cueHideTimer = null;
+  function showCueOverlay(icon, label){
+    el.cueOverlayIcon.textContent = icon;
+    el.cueOverlayLabel.textContent = label;
+    el.cueOverlay.classList.add('show');
+    if (navigator.vibrate) navigator.vibrate([120, 60, 120]);
+    clearTimeout(cueHideTimer);
+    cueHideTimer = setTimeout(function(){ el.cueOverlay.classList.remove('show'); }, 2200);
+  }
+  function sendCue(icon, label){
+    if (!state.connected) return;
+    showCueOverlay(icon, label); // eco local inmediato, sin esperar el viaje de ida y vuelta
+    var payload = { type: 'cue', icon: icon, label: label };
+    if (state.role === 'seguidor'){
+      if (state.followerConn && state.followerConn.open) state.followerConn.send(payload);
+    } else if (state.role === 'director'){
+      state.conns.forEach(function(c){ if (c.open) c.send(payload); });
+    }
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.cue-btn'), function(btn){
+    btn.addEventListener('click', function(){
+      sendCue(btn.getAttribute('data-icon'), btn.getAttribute('data-label'));
+    });
+  });
+
+  // ---------- canal de voz push-to-talk entre músicos ----------
+  // arquitectura: el Director mantiene, con cada músico conectado, una llamada
+  // de audio (MediaConnection) que arranca en silencio. Cuando alguien habla,
+  // el Director reemplaza esa pista de silencio por la voz real en tiempo real
+  // usando RTCRtpSender.replaceTrack — esto NO requiere renegociar la conexión,
+  // así que es instantáneo. Cuando suelta el botón, vuelve a poner silencio.
+  // Quien habla nunca se reenvía la voz a sí mismo.
+  var silentTrackSingleton = null;
+  function getSilentTrack(){
+    if (silentTrackSingleton) return silentTrackSingleton;
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var dst = ctx.createMediaStreamDestination();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      gain.gain.value = 0; // silencio total, pero la pista queda "viva"
+      osc.connect(gain).connect(dst);
+      osc.start();
+      silentTrackSingleton = dst.stream.getAudioTracks()[0];
+    } catch (e){ silentTrackSingleton = null; }
+    return silentTrackSingleton;
+  }
+  function ensureLocalMicTrack(cb){
+    if (state.localAudioTrack){ cb(state.localAudioTrack); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      window.alert('Este navegador no permite usar el micrófono acá.');
+      cb(null);
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function(stream){
+      state.localAudioStream = stream;
+      state.localAudioTrack = stream.getAudioTracks()[0];
+      cb(state.localAudioTrack);
+    }).catch(function(err){
+      window.alert('No se pudo usar el micrófono (' + err.message + '). Revisá los permisos del navegador.');
+      cb(null);
+    });
+  }
+  function getAudioSender(mediaConnection){
+    if (!mediaConnection || !mediaConnection.peerConnection) return null;
+    var senders = mediaConnection.peerConnection.getSenders();
+    for (var i = 0; i < senders.length; i++){
+      if (senders[i].track && senders[i].track.kind === 'audio') return senders[i];
+    }
+    return null;
+  }
+  function revertAllOutgoingToSilence(){
+    var silent = getSilentTrack();
+    if (!silent) return;
+    Object.keys(state.talkCallsOut).forEach(function(peerId){
+      var sender = getAudioSender(state.talkCallsOut[peerId]);
+      if (sender && sender.track !== silent) sender.replaceTrack(silent).catch(function(){});
+    });
+  }
+  function sendTalkingSignal(on){
+    var payload = { type: 'talking', on: on };
+    if (state.role === 'seguidor'){
+      if (state.followerConn && state.followerConn.open) state.followerConn.send(payload);
+    } else if (state.role === 'director'){
+      state.conns.forEach(function(c){ if (c.open) c.send(payload); });
+    }
+    el.talkingBadge.classList.toggle('show', !!on);
+  }
+  function startTalking(){
+    if (!state.connected) return;
+    ensureLocalMicTrack(function(track){
+      if (!track) return;
+      if (state.role === 'seguidor'){
+        state.followerTalkCall = state.peer.call('concierto-dir-' + state.roomCode, new MediaStream([track]));
+      } else if (state.role === 'director'){
+        Object.keys(state.talkCallsOut).forEach(function(peerId){
+          var sender = getAudioSender(state.talkCallsOut[peerId]);
+          if (sender) sender.replaceTrack(track).catch(function(){});
+        });
+      }
+      sendTalkingSignal(true);
+      if (navigator.vibrate) navigator.vibrate(50);
+    });
+  }
+  function stopTalking(){
+    if (state.role === 'seguidor'){
+      if (state.followerTalkCall){ state.followerTalkCall.close(); state.followerTalkCall = null; }
+    } else if (state.role === 'director'){
+      revertAllOutgoingToSilence();
+    }
+    sendTalkingSignal(false);
+  }
+  var talkPressed = false;
+  function talkDown(e){
+    if (e.cancelable) e.preventDefault();
+    if (talkPressed) return;
+    talkPressed = true;
+    el.talkBtn.classList.add('talking');
+    startTalking();
+  }
+  function talkUp(){
+    if (!talkPressed) return;
+    talkPressed = false;
+    el.talkBtn.classList.remove('talking');
+    stopTalking();
+  }
+  el.talkBtn.addEventListener('pointerdown', talkDown);
+  el.talkBtn.addEventListener('pointerup', talkUp);
+  el.talkBtn.addEventListener('pointercancel', talkUp);
+  el.talkBtn.addEventListener('pointerleave', talkUp);
+  // el conteo visual siempre se muestra (aunque la voz guía esté apagada o el
+  // navegador no soporte TTS), ya que es el respaldo para cuando el volumen del
+  // show no deja escuchar la voz.
+  var countInTimeoutId = null;
+  var countInAbort = null;
+  function playCountIn(beats, cb){
+    var interval = 60000 / state.bpm;
+    var i = 0;
+    state.counting = true;
+    skipCountIn = false;
+    function finish(){
+      if (countInTimeoutId){ clearTimeout(countInTimeoutId); countInTimeoutId = null; }
+      countInAbort = null;
+      state.counting = false;
+      skipCountIn = false;
+      hideCountVisual();
+      cb();
+    }
+    countInAbort = finish;
+    (function tick(){
+      if (skipCountIn || i >= beats){ finish(); return; }
+      showCountVisual(i + 1);
+      // la voz se dispara en el siguiente frame: así el número grande se
+      // pinta de inmediato, sin esperar a que el motor de TTS del celular
+      // responda (en algunos teléfonos tarda y bloqueaba el dibujo)
+      var word = COUNT_WORDS[i] || String(i + 1);
+      requestAnimationFrame(function(){ speak(word); });
+      i++;
+      countInTimeoutId = setTimeout(tick, interval);
+    })();
+  }
+
+  var lastAnnouncedSection = null;
+  function maybeAnnounceSection(label){
+    if (!state.scrolling) return;
+    if (label && label !== lastAnnouncedSection){
+      lastAnnouncedSection = label;
+      speak(label);
+    }
+  }
+
+  // ---------- tap tempo ----------
+  el.tapTempo.addEventListener('click', function(){
+    var now = Date.now();
+    state.tapTimes.push(now);
+    if (state.tapTimes.length > 6) state.tapTimes.shift();
+    if (state.tapTimes.length >= 2){
+      var diffs = [];
+      for (var i = 1; i < state.tapTimes.length; i++){
+        diffs.push(state.tapTimes[i] - state.tapTimes[i-1]);
+      }
+      var avg = diffs.reduce(function(a,b){return a+b;}, 0) / diffs.length;
+      var bpm = Math.round(60000 / avg);
+      if (bpm > 30 && bpm < 260){
+        state.bpm = bpm;
+        el.bpmNum.textContent = bpm;
+        if (state.metroOn) startMetro();
+        if (state.syncBpm) el.speedLabel.textContent = 'Distancia por negra (BPM ' + bpm + ')';
+        broadcastPatch({ bpm: state.bpm });
+        updateSpeedReadout();
+      }
+    }
+    el.tapDot.parentElement.classList.add('beat');
+    setTimeout(function(){ el.tapTempo.classList.remove('beat'); }, 120);
+    if (state.tapTimes.length > 0){
+      clearTimeout(window.__tapReset);
+      window.__tapReset = setTimeout(function(){ state.tapTimes = []; }, 2000);
+    }
+  });
+
+  // ---------- suavizado del scroll del Seguidor entre actualizaciones del Director ----------
+  // antes, cada mensaje de scroll (cada ~100ms) saltaba el scrollTop de forma
+  // instantánea al valor recibido, lo que se sentía como pequeños "tirones".
+  // Ahora el Seguidor guarda la posición recibida como "objetivo" y se acerca
+  // a ella de a poco en cada cuadro, salvo que la diferencia sea grande (un
+  // salto real, como un reinicio de canción), en cuyo caso salta directo.
+  var followerSmoothRaf = null;
+  function stopFollowerSmoothLoop(){
+    if (followerSmoothRaf){ cancelAnimationFrame(followerSmoothRaf); followerSmoothRaf = null; }
+  }
+  function followerSmoothStep(){
+    if (state.role !== 'seguidor' || !state.scrolling || state.localFallback || state.scrollTargetTop == null){
+      followerSmoothRaf = null;
+      return;
+    }
+    var current = el.lyrics.scrollTop;
+    var diff = state.scrollTargetTop - current;
+    if (Math.abs(diff) > 200){
+      el.lyrics.scrollTop = state.scrollTargetTop; // salto real (ej. reinicio de canción): no suavizar
+    } else if (Math.abs(diff) > 0.5){
+      el.lyrics.scrollTop = current + diff * 0.25;
+    }
+    followerSmoothRaf = requestAnimationFrame(followerSmoothStep);
+  }
+  function ensureFollowerSmoothLoop(){
+    if (state.role === 'seguidor' && state.scrolling && !state.localFallback && !followerSmoothRaf){
+      followerSmoothRaf = requestAnimationFrame(followerSmoothStep);
+    }
+  }
+
+  // ---------- respaldo local del Seguidor si se cae la conexión a mitad de canción ----------
+  // en vez de quedarse congelado esperando datos que ya no llegan, el Seguidor
+  // sigue moviendo el scroll localmente según el BPM/velocidad conocidos hasta
+  // que la conexión vuelva (entonces el mensaje 'scroll' real retoma el control).
+  function stopLocalFallback(){
+    if (!state.localFallback) return;
+    state.localFallback = false;
+    el.connFallbackBadge.classList.remove('show');
+    if (scrollRaf){ cancelAnimationFrame(scrollRaf); scrollRaf = null; }
+  }
+  function followerFallbackStep(ts){
+    if (!lastTs) lastTs = ts;
+    var dt = (ts - lastTs) / 1000;
+    lastTs = ts;
+    advanceScrollTop(dt);
+    if (state.localFallback && state.scrolling) scrollRaf = requestAnimationFrame(followerFallbackStep);
+  }
+  function startLocalFallback(){
+    if (state.role !== 'seguidor' || !state.scrolling || state.localFallback) return;
+    state.localFallback = true;
+    stopFollowerSmoothLoop();
+    el.connFallbackBadge.classList.add('show');
+    lastTs = null;
+    scrollRaf = requestAnimationFrame(followerFallbackStep);
+  }
+  // el evento 'close' de PeerJS no siempre se dispara al caerse el wifi (a veces
+  // la conexión simplemente deja de mandar datos sin avisar), así que además
+  // vigilamos cuánto hace que no llega un mensaje de scroll real del Director.
+  var lastRemoteScrollTs = 0;
+  setInterval(function(){
+    if (state.role === 'seguidor' && state.scrolling && !state.localFallback && lastRemoteScrollTs){
+      if (Date.now() - lastRemoteScrollTs > 1500) startLocalFallback();
+    }
+  }, 700);
+
+  // ---------- modo director: sincronización real entre dispositivos (WebRTC vía PeerJS) ----------
+  function currentFullPayload(){
+    return {
+      type: 'full',
+      song: currentSong(),
+      semis: state.semis,
+      bpm: state.bpm,
+      scrolling: state.scrolling,
+      metroOn: state.metroOn
+    };
+  }
+  function broadcastFull(){
+    if (state.role !== 'director' || !state.connected) return;
+    var payload = currentFullPayload();
+    state.conns.forEach(function(c){ if (c.open) c.send(payload); });
+  }
+  function broadcastPatch(fields){
+    if (state.role !== 'director' || !state.connected) return;
+    var payload = Object.assign({ type: 'state' }, fields);
+    state.conns.forEach(function(c){ if (c.open) c.send(payload); });
+  }
+  var lastScrollSeq = -1;
+  function applyRemoteState(msg){
+    if (msg.type === 'scroll'){
+      // descarta una posición vieja que haya llegado tarde o fuera de orden
+      // (posible en el canal "rápido" de scroll, que no garantiza el orden)
+      if (typeof msg.seq === 'number'){
+        if (msg.seq <= lastScrollSeq) return;
+        lastScrollSeq = msg.seq;
+      }
+      lastRemoteScrollTs = Date.now();
+      stopLocalFallback();
+      state.scrollTargetTop = msg.top;
+      ensureFollowerSmoothLoop();
+      return;
+    }
+    if (msg.type === 'ping'){
+      if (state.followerConn && state.followerConn.open) state.followerConn.send({ type: 'pong', ts: msg.ts });
+      return;
+    }
+    if (msg.type === 'pong'){
+      state.pingMs = Date.now() - msg.ts;
+      updatePingBadge();
+      return;
+    }
+    if (msg.type === 'cue'){
+      showCueOverlay(msg.icon, msg.label);
+      return;
+    }
+    if (msg.type === 'talking'){
+      el.talkingBadge.classList.toggle('show', !!msg.on);
+      return;
+    }
+    if (msg.song){
+      // si el Director cambia de canción mientras el Seguidor tiene abierto
+      // el panel de referencia de audio (o el de detección), no tiene
+      // sentido seguir mostrando el audio/lista de la canción anterior
+      if (typeof closeRefAudioPanel === 'function' && el.refAudioPanel.classList.contains('show')) closeRefAudioPanel();
+      if (typeof closeDetectPanel === 'function' && detectProposal && detectProposal.length) closeDetectPanel();
+      state.remoteSong = msg.song;
+    }
+    if (msg.semis !== undefined) state.semis = msg.semis;
+    if (msg.bpm !== undefined){ state.bpm = msg.bpm; el.bpmNum.textContent = state.bpm; updateSpeedReadout(); }
+    if (msg.counting){ playCountIn(4, function(){}); }
+    if (msg.scrolling !== undefined){
+      state.scrolling = msg.scrolling;
+      el.scrollToggle.classList.toggle('playing', state.scrolling);
+      el.scrollToggle.textContent = state.scrolling ? '⏸' : '▶';
+      if (state.scrolling){
+        requestWakeLock();
+        lastRemoteScrollTs = Date.now();
+      } else {
+        releaseWakeLock();
+        stopLocalFallback();
+        stopFollowerSmoothLoop();
+      }
+    }
+    if (msg.metroOn !== undefined){
+      state.metroOn = msg.metroOn;
+      el.metroToggle.classList.toggle('on', state.metroOn);
+      if (state.metroOn) startMetro(); else stopMetro();
+    }
+    renderAll();
+  }
+  // ---------- indicador de latencia (ping) ----------
+  function updatePingBadge(){
+    if (!state.connected || state.pingMs == null){
+      el.pingBadge.classList.remove('show');
+      return;
+    }
+    el.pingBadge.textContent = '🏓 ' + state.pingMs + 'ms';
+    el.pingBadge.className = 'ping-badge show' + (state.pingMs > 400 ? ' bad' : state.pingMs > 150 ? ' warn' : '');
+  }
+  function handleFollowerMessageOnDirector(conn, msg){
+    if (msg.type === 'ping'){
+      if (conn.open) conn.send({ type: 'pong', ts: msg.ts });
+      return;
+    }
+    if (msg.type === 'pong'){
+      conn.__pingMs = Date.now() - msg.ts;
+      var vals = state.conns.map(function(c){ return c.__pingMs; }).filter(function(v){ return typeof v === 'number'; });
+      state.pingMs = vals.length ? Math.round(vals.reduce(function(a, b){ return a + b; }, 0) / vals.length) : null;
+      updatePingBadge();
+      return;
+    }
+    if (msg.type === 'cue'){
+      // un músico mandó una señal: el Director la muestra en su propia
+      // pantalla y la reenvía a todos los demás músicos (menos a quien la mandó,
+      // que ya la vio localmente al tocar el botón).
+      showCueOverlay(msg.icon, msg.label);
+      state.conns.forEach(function(c){ if (c !== conn && c.open) c.send(msg); });
+      return;
+    }
+    if (msg.type === 'talking'){
+      el.talkingBadge.classList.toggle('show', !!msg.on);
+      state.conns.forEach(function(c){ if (c !== conn && c.open) c.send(msg); });
+    }
+  }
+  setInterval(function(){
+    if (!state.connected) return;
+    if (state.role === 'seguidor' && state.followerConn && state.followerConn.open){
+      state.followerConn.send({ type: 'ping', ts: Date.now() });
+    } else if (state.role === 'director'){
+      state.conns.forEach(function(c){ if (c.open) c.send({ type: 'ping', ts: Date.now() }); });
+    }
+  }, 3000);
+  function updateFollowerBadge(){
+    if (state.role !== 'director' || !state.connected){
+      el.followerBadge.classList.remove('show');
+      return;
+    }
+    var n = state.conns.length;
+    el.followerBadge.textContent = '👥 ' + n + (n === 1 ? ' músico' : ' músicos');
+    el.followerBadge.classList.toggle('zero', n === 0);
+    el.followerBadge.classList.add('show');
+  }
+
+  function setRole(r){
+    state.role = r;
+    el.roleDirector.classList.toggle('active', r === 'director');
+    el.roleFollower.classList.toggle('active', r === 'seguidor');
+    document.body.classList.toggle('follower-locked', r === 'seguidor');
+    stopReconnectLoop();
+    state.hasConnectedOnce = false;
+    if (state.peer){ state.peer.destroy(); state.peer = null; }
+    state.conns = [];
+    state.scrollConns = [];
+    state.followerConn = null;
+    state.followerScrollConn = null;
+    state.remoteSong = null;
+    state.connected = false;
+    state.pingMs = null;
+    state.scrollTargetTop = null;
+    lastScrollSeq = -1;
+    stopLocalFallback();
+    stopFollowerSmoothLoop();
+    updatePingBadge();
+    el.cueRow.classList.remove('show');
+            el.talkRow.classList.remove('show');
+    // el destroy() de arriba ya cierra las llamadas de audio activas; acá solo
+    // limpiamos nuestras referencias y soltamos el micrófono si estaba abierto
+    state.talkCallsOut = {};
+    state.followerTalkCall = null;
+    if (state.localAudioStream){
+      state.localAudioStream.getTracks().forEach(function(t){ t.stop(); });
+      state.localAudioStream = null;
+      state.localAudioTrack = null;
+    }
+    el.talkingBadge.classList.remove('show');
+    el.talkBtn.classList.remove('talking');
+    talkPressed = false;
+    el.connStatus.textContent = 'Sin conectar';
+    el.connStatus.style.color = 'var(--muted)';
+    updateFollowerBadge();
+    renderAll();
+  }
+  el.roleDirector.addEventListener('click', function(){ setRole('director'); });
+  el.roleFollower.addEventListener('click', function(){ setRole('seguidor'); });
+
+  // ---------- reconexión automática si se cae el wifi (Director o Seguidor) ----------
+  // solo aplica después de haber logrado conectar una vez (para no reintentar
+  // en bucle por un código de sala mal escrito o inexistente).
+  var reconnectTimer = null;
+  var reconnectAttempts = 0;
+  function stopReconnectLoop(){
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    reconnectAttempts = 0;
+  }
+  function scheduleReconnect(){
+    if (!state.hasConnectedOnce || !state.roomCode) return;
+    if (reconnectTimer) return; // ya hay un reintento programado
+    reconnectAttempts++;
+    var delaySec = Math.min(2 + reconnectAttempts, 8); // sube de 3s hasta un tope de 8s
+    var tries = reconnectAttempts;
+    var roleLabel = state.role === 'director' ? ' (se reconecta la sala; los músicos ya conectados no se cortan)' : (state.localFallback ? '. Sigue tocando por BPM mientras tanto.' : '.');
+    var announce = function(secsLeft){
+      el.connStatus.textContent = 'Conexión perdida — reintentando en ' + secsLeft + 's (intento ' + tries + ')' + roleLabel;
+      el.connStatus.style.color = 'var(--danger)';
+    };
+    announce(delaySec);
+    reconnectTimer = setTimeout(function(){
+      reconnectTimer = null;
+      if (state.connected) return;
+      attemptConnect(state.roomCode, true);
+    }, delaySec * 1000);
+  }
+
+  var connectTimeout = null;
+  function attemptConnect(code, isAutoRetry){
+    if (typeof Peer === 'undefined'){
+      el.connStatus.textContent = 'No se pudo cargar el motor de conexión. Abre esta app desde un link web (https://...), no como archivo descargado.';
+      el.connStatus.style.color = 'var(--danger)';
+      return;
+    }
+    state.roomCode = code;
+    if (!isAutoRetry){
+      el.connStatus.textContent = 'Conectando…';
+      el.connStatus.style.color = 'var(--muted)';
+    }
+    if (state.peer) state.peer.destroy();
+    if (connectTimeout) clearTimeout(connectTimeout);
+    connectTimeout = setTimeout(function(){
+      if (!state.connected){
+        if (state.hasConnectedOnce){
+          scheduleReconnect();
+        } else {
+          el.connStatus.textContent = 'No conecta. Revisa que ambos dispositivos tengan internet y usen el mismo link (https://...), no un archivo local.';
+          el.connStatus.style.color = 'var(--danger)';
+        }
+      }
+    }, 8000);
+
+    try {
+      if (state.role === 'director'){
+        state.peer = new Peer('concierto-dir-' + code);
+        state.peer.on('open', function(){
+          clearTimeout(connectTimeout);
+          state.connected = true;
+          state.hasConnectedOnce = true;
+          stopReconnectLoop();
+          state.conns = [];
+          state.scrollConns = [];
+          el.connStatus.textContent = isAutoRetry ? 'Sala ' + code + ' reconectada · esperando músicos' : 'Sala ' + code + ' · esperando músicos';
+          el.connStatus.style.color = 'var(--accent)';
+          el.cueRow.classList.add('show');
+            el.talkRow.classList.add('show');
+          updateFollowerBadge();
+        });
+        state.peer.on('connection', function(conn){
+          if (conn.label === 'scroll'){
+            // canal secundario, no-ordenado: solo lleva posición de scroll, así
+            // un paquete perdido/retrasado no bloquea a los que vienen después.
+            conn.on('open', function(){ state.scrollConns.push(conn); });
+            conn.on('close', function(){
+              state.scrollConns = state.scrollConns.filter(function(c){ return c !== conn; });
+            });
+            return;
+          }
+          conn.on('open', function(){
+            state.conns.push(conn);
+            conn.send(currentFullPayload());
+            el.connStatus.textContent = 'Sala ' + code + ' · ' + state.conns.length + ' conectado(s)';
+            updateFollowerBadge();
+            // canal de voz: el Director llama a este músico con una pista de
+            // silencio; cuando alguien hable, esa pista se reemplaza en el
+            // momento (ver revertAllOutgoingToSilence / startTalking).
+            var silent = getSilentTrack();
+            if (silent){
+              var call = state.peer.call(conn.peer, new MediaStream([silent]));
+              if (call) state.talkCallsOut[conn.peer] = call;
+            }
+          });
+          conn.on('data', function(msg){ handleFollowerMessageOnDirector(conn, msg); });
+          conn.on('close', function(){
+            state.conns = state.conns.filter(function(c){ return c !== conn; });
+            el.connStatus.textContent = 'Sala ' + code + ' · ' + state.conns.length + ' conectado(s)';
+            updateFollowerBadge();
+            if (state.talkCallsOut[conn.peer]){
+              state.talkCallsOut[conn.peer].close();
+              delete state.talkCallsOut[conn.peer];
+            }
+          });
+        });
+        // un músico empezó a hablar (push-to-talk): recibe su llamada de audio
+        // y reenvía esa voz a todos los demás músicos, menos a quien habló.
+        state.peer.on('call', function(call){
+          call.answer();
+          call.on('stream', function(remoteStream){
+            var track = remoteStream.getAudioTracks()[0];
+            if (!track) return;
+            Object.keys(state.talkCallsOut).forEach(function(peerId){
+              if (peerId === call.peer) return;
+              var sender = getAudioSender(state.talkCallsOut[peerId]);
+              if (sender) sender.replaceTrack(track).catch(function(){});
+            });
+          });
+          call.on('close', function(){ revertAllOutgoingToSilence(); });
+        });
+        // el socket del Director hacia el servidor de señalización se puede caer
+        // (wifi inestable) sin que las conexiones ya abiertas con los músicos se
+        // corten — pero si se cae, ningún músico nuevo puede unirse hasta que
+        // se restablezca. reconnect() reintenta sin cambiar el código de sala.
+        state.peer.on('disconnected', function(){
+          if (state.peer && !state.peer.destroyed){
+            el.connStatus.textContent = 'Conexión con el servidor perdida — reconectando…';
+            el.connStatus.style.color = 'var(--danger)';
+            state.peer.reconnect();
+          }
+        });
+        state.peer.on('error', function(err){
+          clearTimeout(connectTimeout);
+          if (err.type === 'unavailable-id'){
+            el.connStatus.textContent = 'Ese código ya está en uso ahora mismo. Prueba con otro código.';
+            el.connStatus.style.color = 'var(--danger)';
+            return;
+          }
+          if (state.hasConnectedOnce){
+            state.connected = false;
+            el.cueRow.classList.remove('show');
+            el.talkRow.classList.remove('show');
+            scheduleReconnect();
+          } else {
+            el.connStatus.textContent = 'Error de conexión (' + err.type + '). Revisa tu internet e intenta de nuevo.';
+            el.connStatus.style.color = 'var(--danger)';
+          }
+        });
+      } else {
+        state.peer = new Peer();
+        state.peer.on('open', function(){
+          var conn = state.peer.connect('concierto-dir-' + code, { reliable: true, label: 'control' });
+          state.followerConn = conn;
+          // canal secundario, no-ordenado, solo para la posición de scroll (ver nota arriba)
+          var scrollConn = state.peer.connect('concierto-dir-' + code, { reliable: false, label: 'scroll' });
+          state.followerScrollConn = scrollConn;
+          scrollConn.on('data', applyRemoteState);
+          // canal de voz: el Director llama con una pista que arranca en
+          // silencio y cambia a voz real cuando alguien habla (sin
+          // renegociar la conexión) — acá solo hace falta reproducirla.
+          state.peer.on('call', function(call){
+            call.answer();
+            call.on('stream', function(remoteStream){
+              el.talkAudio.srcObject = remoteStream;
+              el.talkAudio.play().catch(function(){});
+            });
+          });
+          conn.on('open', function(){
+            clearTimeout(connectTimeout);
+            state.connected = true;
+            state.hasConnectedOnce = true;
+            stopReconnectLoop();
+            stopLocalFallback();
+            el.connStatus.textContent = isAutoRetry ? 'Reconectado a la sala ' + code : 'Conectado a la sala ' + code;
+            el.connStatus.style.color = 'var(--accent)';
+            el.cueRow.classList.add('show');
+            el.talkRow.classList.add('show');
+          });
+          conn.on('data', applyRemoteState);
+          conn.on('close', function(){
+            state.connected = false;
+            state.pingMs = null;
+            updatePingBadge();
+            el.cueRow.classList.remove('show');
+            el.talkRow.classList.remove('show');
+            if (state.scrolling){
+              startLocalFallback();
+            }
+            if (state.hasConnectedOnce){
+              scheduleReconnect();
+            } else {
+              el.connStatus.textContent = 'Conexión perdida — vuelve a tocar Conectar';
+              el.connStatus.style.color = 'var(--danger)';
+            }
+          });
+          conn.on('error', function(){
+            if (state.hasConnectedOnce){
+              scheduleReconnect();
+            } else {
+              el.connStatus.textContent = 'No se encontró la sala "' + code + '". Confirma que el director ya conectó y que el código es igual en ambos.';
+              el.connStatus.style.color = 'var(--danger)';
+            }
+          });
+        });
+        state.peer.on('error', function(err){
+          clearTimeout(connectTimeout);
+          if (state.hasConnectedOnce){
+            scheduleReconnect();
+          } else {
+            el.connStatus.textContent = 'Error de conexión (' + err.type + '). Revisa tu internet e intenta de nuevo.';
+            el.connStatus.style.color = 'var(--danger)';
+          }
+        });
+      }
+    } catch (e){
+      clearTimeout(connectTimeout);
+      el.connStatus.textContent = 'Error inesperado al conectar. Revisa que estés usando un link web y no un archivo local.';
+      el.connStatus.style.color = 'var(--danger)';
+    }
+  }
+  el.connectBtn.addEventListener('click', function(){
+    var code = el.roomCode.value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!code){
+      el.connStatus.textContent = 'Escribe un código de sala antes de conectar';
+      el.connStatus.style.color = 'var(--danger)';
+      el.roomCode.focus();
+      return;
+    }
+    stopReconnectLoop();
+    attemptConnect(code, false);
+  });
+
+  // ---------- pantalla completa ----------
+  var fsEl = document.documentElement;
+  function isFullscreen(){
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  el.fullscreenToggle.addEventListener('click', function(){
+    if (!isFullscreen()){
+      var req = fsEl.requestFullscreen || fsEl.webkitRequestFullscreen;
+      if (req){
+        var result = req.call(fsEl);
+        if (result && result.catch) result.catch(function(){ /* el navegador puede negar el permiso: se ignora */ });
+      }
+    } else {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) exit.call(document);
+    }
+  });
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function(evt){
+    document.addEventListener(evt, function(){
+      el.fullscreenToggle.classList.toggle('on', isFullscreen());
+    });
+  });
+
+  // ---------- exportar / importar repertorio como texto ----------
+  function songToShareBlock(song){
+    return "### Título: " + song.title + "\n" +
+      "### Tono: " + song.key + "\n" +
+      "### BPM: " + (song.bpm || 80) + "\n" +
+      "### Descripción: " + (song.meta || "") + "\n" +
+      songToText(song);
+  }
+  function exportRepertoireText(){
+    return songs.map(songToShareBlock).join("\n\n---\n\n");
+  }
+  function downloadTextFile(text, filename){
+    var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  }
+  function runExportRepertoire(){
+    var text = exportRepertoireText();
+    localStorage.setItem('concierto_last_export_ts', String(Date.now()));
+    if (navigator.share){
+      navigator.share({ title: 'Repertorio', text: text }).catch(function(){ /* cancelado por el usuario: se ignora */ });
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        window.alert('Repertorio copiado al portapapeles. Pégalo en un chat o nota para compartirlo.');
+      }).catch(function(){ downloadTextFile(text, 'repertorio.txt'); });
+      return;
+    }
+    downloadTextFile(text, 'repertorio.txt');
+  }
+  el.exportBtn.addEventListener('click', runExportRepertoire);
+
+  // ---------- recordatorio periódico de exportar el repertorio como respaldo ----------
+  // todo el repertorio vive solo en localStorage de este dispositivo: si se
+  // borra el caché del navegador o cambian de celular, se pierde sin aviso.
+  var DAY_MS = 24 * 60 * 60 * 1000;
+  function maybeShowBackupReminder(){
+    var lastExport = parseInt(localStorage.getItem('concierto_last_export_ts') || '0', 10);
+    var lastPrompt = parseInt(localStorage.getItem('concierto_last_backup_prompt_ts') || '0', 10);
+    var now = Date.now();
+    if (now - lastExport < 7 * DAY_MS) return; // ya exportó hace poco
+    if (now - lastPrompt < 3 * DAY_MS) return; // ya se lo recordamos hace poco, no insistir
+    el.backupReminder.classList.add('show');
+    localStorage.setItem('concierto_last_backup_prompt_ts', String(now));
+  }
+  el.backupReminderBtn.addEventListener('click', function(){
+    runExportRepertoire();
+    el.backupReminder.classList.remove('show');
+  });
+  el.backupReminderDismiss.addEventListener('click', function(){
+    el.backupReminder.classList.remove('show');
+  });
+  setTimeout(maybeShowBackupReminder, 4000);
+
+  // parsea un texto con uno o más bloques "### Título: ..." y regresa canciones
+  function parseShareText(text){
+    var blocks = text.split(/\n-{3,}\n/);
+    var result = [];
+    blocks.forEach(function(block){
+      var lines = block.split("\n");
+      var title = "", key = "C", meta = "", bpm = 80;
+      var bodyLines = [];
+      lines.forEach(function(raw){
+        var mTitle = raw.match(/^###\s*T[ií]tulo:\s*(.+)/i);
+        var mKey = raw.match(/^###\s*Tono:\s*(.+)/i);
+        var mBpm = raw.match(/^###\s*BPM:\s*(\d+)/i);
+        var mMeta = raw.match(/^###\s*Descripci[oó]n:\s*(.*)/i);
+        if (mTitle){ title = mTitle[1].trim(); }
+        else if (mKey){ key = mKey[1].trim() || "C"; }
+        else if (mBpm){ bpm = parseInt(mBpm[1], 10) || 80; }
+        else if (mMeta){ meta = mMeta[1].trim(); }
+        else { bodyLines.push(raw); }
+      });
+      var bodyText = bodyLines.join("\n").trim();
+      if (!title && !bodyText) return;
+      var sections = parseSongText(bodyText);
+      if (!sections.length) sections = [{ label: "Verso 1", lines: ["[" + key + "]Escribe tu letra aquí"] }];
+      result.push({
+        title: title || "Sin título",
+        key: key,
+        bpm: bpm,
+        meta: meta || "Repertorio importado",
+        sections: sections
+      });
+    });
+    return result;
+  }
+  el.importBtn.addEventListener('click', function(){
+    el.importText.value = "";
+    el.importPreview.textContent = "";
+    el.importOverlay.classList.add('open');
+  });
+  function closeImport(){ el.importOverlay.classList.remove('open'); }
+  el.importClose.addEventListener('click', closeImport);
+  el.importCancel.addEventListener('click', closeImport);
+  el.importText.addEventListener('input', function(){
+    var parsed = parseShareText(el.importText.value);
+    el.importPreview.textContent = parsed.length
+      ? ('Se detectaron ' + parsed.length + ' canción(es): ' + parsed.map(function(s){ return s.title; }).join(', '))
+      : '';
+  });
+  el.importConfirm.addEventListener('click', function(){
+    var parsed = parseShareText(el.importText.value);
+    if (!parsed.length){
+      window.alert('No se detectó ninguna canción en el texto pegado.');
+      return;
+    }
+    parsed.forEach(function(song){ song.id = genSongId(); songs.push(song); });
+    closeDrawer();
+    closeImport();
+    renderAll();
+    persist();
+    window.alert(parsed.length + ' canción(es) agregada(s) a tu repertorio.');
+  });
+
+  setVoiceGuideUI();
+  applySongBpm(songs[state.songIndex]);
+  setSyncBpmUI();
+  renderAll();
+})();
+</script>
+</body>
+</html>

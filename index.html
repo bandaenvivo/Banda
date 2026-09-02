@@ -647,6 +647,8 @@
     font-weight:700;
     min-width: 42px;
     text-align:center;
+    cursor:pointer;
+    border-bottom: 1px dashed var(--muted);
   }
   .toggle{
     width:40px; height:40px;
@@ -1007,7 +1009,7 @@
 <div class="settings-overlay" id="settingsOverlay">
   <div class="settings-panel">
     <div class="settings-panel-header">
-      <span>Ajustes <span style="font-size:11px;opacity:0.5;font-weight:normal;">· build 33</span></span>
+      <span>Ajustes <span style="font-size:11px;opacity:0.5;font-weight:normal;">· build 34</span></span>
       <button class="ghost btn" id="settingsCloseBtn">✕</button>
     </div>
 
@@ -1216,7 +1218,7 @@ Me enamora tu manera de ser"></textarea>
   <div class="row">
     <div class="bpm-block">
       <button class="bpm-tap" id="tapTempo">TAP<div class="dot" id="tapDot"></div></button>
-      <span class="bpm-num" id="bpmNum">80</span>
+      <span class="bpm-num" id="bpmNum" role="button" tabindex="0" title="Tocá para escribir el BPM a mano">80</span>
       <span style="font-size:10px;color:var(--muted);text-transform:uppercase;">bpm</span>
     </div>
     <button class="toggle btn" id="metroToggle">🔔</button>
@@ -3257,6 +3259,23 @@ window.addEventListener('error', function(e){
       clearTimeout(window.__tapReset);
       window.__tapReset = setTimeout(function(){ state.tapTimes = []; }, 2000);
     }
+  });
+  // escribir el BPM a mano, para no depender de tocar TAP varias veces
+  el.bpmNum.addEventListener('click', function(){
+    var input = window.prompt('BPM (30 a 260):', state.bpm);
+    if (input === null) return;
+    var bpm = parseInt(input, 10);
+    if (isNaN(bpm) || bpm < 30 || bpm > 260){
+      window.alert('Ingresá un número entre 30 y 260.');
+      return;
+    }
+    state.tapTimes = [];
+    state.bpm = bpm;
+    el.bpmNum.textContent = bpm;
+    if (state.metroOn) startMetro();
+    if (state.syncBpm) el.speedLabel.textContent = 'Distancia por negra (BPM ' + bpm + ')';
+    broadcastPatch({ bpm: state.bpm });
+    updateSpeedReadout();
   });
 
   // ---------- suavizado del scroll del Seguidor entre actualizaciones del Director ----------
